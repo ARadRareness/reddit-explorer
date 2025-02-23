@@ -208,12 +208,14 @@ class RedditExplorer(QMainWindow):
             # Initialize menu actions
             rename_action = None
             remove_action = None
+            uncategorize_action = None
             set_desc_action = menu.addAction("Set description")
 
             # Don't allow renaming or removing Uncategorized
             if category_name != "Uncategorized":
                 rename_action = menu.addAction("Rename")
                 remove_action = menu.addAction("Remove")
+                uncategorize_action = menu.addAction("Uncategorize posts")
 
             action = menu.exec_(self.tree.viewport().mapToGlobal(position))
 
@@ -224,6 +226,8 @@ class RedditExplorer(QMainWindow):
                     self._rename_category(item, category_name)
                 elif action == remove_action:
                     self._remove_category(item, category_name)
+                elif action == uncategorize_action:
+                    self._uncategorize_posts(item, category_name)
             return
 
         # Handle right-click on subreddit items
@@ -333,7 +337,7 @@ class RedditExplorer(QMainWindow):
         elif parent.text(0) == "Categories":
             # Extract category name without post count
             category_name = item.text(0).split(" (")[0]
-            self._load_category_posts(category_name)
+            self.load_category_posts(category_name)
 
     def _load_subreddit_posts(self, subreddit_name: str):
         """Load and display posts from a subreddit."""
@@ -379,7 +383,7 @@ class RedditExplorer(QMainWindow):
         # Update window title with post count
         self.setWindowTitle(f"Reddit Explorer ({total_posts} posts)")
 
-    def _load_category_posts(self, category_name: str):
+    def load_category_posts(self, category_name: str):
         """Load and display posts from a specific category."""
         # Clear and hide browser and navigation buttons, show subreddit view
         self.browser.hide()
@@ -511,34 +515,11 @@ class RedditExplorer(QMainWindow):
 
         # If we were viewing a category, reload it to reflect any checkbox changes
         if self.current_category:
-            self._load_category_posts(self.current_category)
+            self.load_category_posts(self.current_category)
 
             # Restore checkbox state if we have it
             if show_in_categories is not None:
                 self.browser_category_checkbox.setChecked(show_in_categories)
-
-    def _refresh_category_counts(self):
-        """Refresh the category counts in the tree widget."""
-        cursor = self.db.get_cursor()
-
-        # Get current category counts
-        cursor.execute(
-            """
-            SELECT c.name, COUNT(sp.id) as post_count 
-            FROM categories c 
-            LEFT JOIN saved_posts sp ON sp.category = c.name AND sp.show_in_categories = 1
-            GROUP BY c.name 
-            ORDER BY c.name
-            """
-        )
-        category_counts = {row[0]: row[1] for row in cursor.fetchall()}
-
-        # Update tree items
-        for i in range(self.categories_root.childCount()):
-            item = self.categories_root.child(i)
-            category_name = item.text(0).split(" (")[0]  # Get name without count
-            count = category_counts.get(category_name, 0)
-            item.setText(0, f"{category_name} ({count})")
 
     def _handle_browser_category_changed(self, state: int):
         """Handle category checkbox changes in browser view."""
@@ -555,7 +536,7 @@ class RedditExplorer(QMainWindow):
         self.update_post_category_visibility(post.id, show_in_categories)
 
         # Refresh category counts after visibility change
-        self._refresh_category_counts()
+        self.refresh_category_counts()
 
     def save_post(self, post: RedditPost) -> None:
         """Save a post to the database."""
@@ -599,7 +580,7 @@ class RedditExplorer(QMainWindow):
             self.db.commit()
 
             # Refresh category counts after saving new post
-            self._refresh_category_counts()
+            self.refresh_category_counts()
 
         except sqlite3.IntegrityError:
             # Post already saved
@@ -612,7 +593,7 @@ class RedditExplorer(QMainWindow):
         self.db.commit()
 
         # Refresh category counts after deleting the post
-        self._refresh_category_counts()
+        self.refresh_category_counts()
 
     def update_post_category_visibility(
         self, post_id: str, show_in_categories: bool
@@ -626,7 +607,7 @@ class RedditExplorer(QMainWindow):
         self.db.commit()
 
         # Refresh category counts after visibility change
-        self._refresh_category_counts()
+        self.refresh_category_counts()
 
     def add_subreddit(self, subreddit_name: str) -> None:
         """Add a new subreddit to database and tree."""
@@ -804,8 +785,73 @@ class RedditExplorer(QMainWindow):
                 parent.takeChild(parent.indexOfChild(item))
 
                 # Refresh category counts to update Uncategorized
-                self._refresh_category_counts()
+                self.refresh_category_counts()
 
             except sqlite3.Error:
                 # Handle database error
                 pass
+
+    def _uncategorize_posts(self, item: QTreeWidgetItem, category_name: str):
+        """Move all posts from a category to Uncategorized after confirmation."""
+        # Show confirmation dialog
+        reply = QMessageBox.question(
+            self,
+            "Uncategorize Posts",
+            f"Are you sure you want to move all posts from '{category_name}' to 'Uncategorized'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            cursor = self.db.get_cursor()
+            try:
+                # Move posts to Uncategorized
+                cursor.execute(
+                    "UPDATE saved_posts SET category = 'Uncategorized' WHERE category = ?",
+                    (category_name,),
+                )
+                self.db.commit()
+
+                # Refresh category counts to update both categories
+                self.refresh_category_counts()
+
+                # If we're currently viewing this category, switch to Uncategorized
+                if self.current_category == category_name:
+                    self.load_category_posts("Uncategorized")
+
+            except sqlite3.Error:
+                # Handle database error
+                pass
+
+    def refresh_category_counts(self):
+        """Refresh the category counts in the tree widget."""
+        cursor = self.db.get_cursor()
+
+        # Get current category counts
+        cursor.execute(
+            """
+            SELECT c.name, COUNT(sp.id) as post_count 
+            FROM categories c 
+            LEFT JOIN saved_posts sp ON sp.category = c.name AND sp.show_in_categories = 1
+            GROUP BY c.name 
+            ORDER BY c.name
+            """
+        )
+        category_counts = {row[0]: row[1] for row in cursor.fetchall()}
+
+        # Update tree items
+        for i in range(self.categories_root.childCount()):
+            item = self.categories_root.child(i)
+            category_name = item.text(0).split(" (")[0]  # Get name without count
+            count = category_counts.get(category_name, 0)
+            item.setText(0, f"{category_name} ({count})")
+
+    @property
+    def current_category(self) -> Optional[str]:
+        """Get the current category name."""
+        return self._current_category
+
+    @current_category.setter
+    def current_category(self, value: Optional[str]):
+        """Set the current category name."""
+        self._current_category = value
