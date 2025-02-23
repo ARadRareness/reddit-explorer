@@ -26,3 +26,6 @@ DEFAULT_CATEGORY = "Uncategorized"
 
 # Image Extensions
 VALID_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif"]
+
+# OpenAI
+DEFAULT_OPENAI_MODEL = "gpt-4o"  # Default model if not specified in environment
