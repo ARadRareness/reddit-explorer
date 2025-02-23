@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QMenu,
     QSizePolicy,
+    QInputDialog,
 )
 from PySide6.QtCore import Qt, QPoint
 from reddit_explorer.data.models import RedditPost
@@ -180,15 +181,67 @@ class RedditExplorer(QMainWindow):
         if item is None:
             return
 
-        # Only show menu for subreddit items
+        menu = QMenu()
+
+        # Handle right-click on Categories root
+        if item.text(0) == "Categories":
+            add_action = menu.addAction("Add Category")
+            action = menu.exec_(self.tree.viewport().mapToGlobal(position))
+
+            if action == add_action:
+                self._add_category()
+            return
+
+        # Handle right-click on subreddit items
         parent = item.parent()
         if parent and parent.text(0) == "Subreddits":
-            menu = QMenu()
             remove_action = menu.addAction("Remove")
             action = menu.exec_(self.tree.viewport().mapToGlobal(position))
 
             if action == remove_action:
                 self._remove_subreddit(item.text(0))
+
+    def _add_category(self):
+        """Show dialog to add a new category."""
+        name, ok = QInputDialog.getText(self, "Add Category", "Enter category name:")
+
+        if ok and name:
+            # Clean the input - remove leading/trailing whitespace
+            name = name.strip()
+
+            if not name:  # Check if name is empty after stripping
+                return
+
+            cursor = self.db.get_cursor()
+            try:
+                # Add to database
+                cursor.execute("INSERT INTO categories (name) VALUES (?)", (name,))
+                self.db.commit()
+
+                # Add to tree with initial count of 0
+                display_text = f"{name} (0)"
+
+                # Find the correct position to insert alphabetically
+                insert_pos = 0
+                for i in range(self.categories_root.childCount()):
+                    item = self.categories_root.child(i)
+                    current_name = item.text(0).split(" (")[0]
+                    if name.lower() < current_name.lower():
+                        break
+                    insert_pos = i + 1
+
+                # Insert at the correct position
+                QTreeWidgetItem(self.categories_root)  # Create empty item
+                self.categories_root.insertChild(
+                    insert_pos, QTreeWidgetItem([display_text])
+                )
+                self.categories_root.takeChild(
+                    self.categories_root.childCount() - 1
+                )  # Remove empty item
+
+            except sqlite3.IntegrityError:
+                # Category already exists
+                pass
 
     def _remove_subreddit(self, subreddit_name: str):
         """Remove a subreddit from database and tree."""
