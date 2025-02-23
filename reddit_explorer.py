@@ -235,6 +235,9 @@ class RedditExplorer(QMainWindow):
         self.setWindowTitle("Reddit Explorer")
         self.setMinimumSize(1200, 800)
 
+        # Debug flag to control logging
+        self.debug = False
+
         # Create image cache directory
         self.cache_dir = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "image_cache"
@@ -505,8 +508,10 @@ class RedditExplorer(QMainWindow):
         self.web_profile.scripts().insert(script)
 
         # Add console message handler
-        page.javaScriptConsoleMessage = lambda level, msg, line, source: print(
-            f"JS {level}: {msg} (line {line})"
+        page.javaScriptConsoleMessage = (
+            (lambda level, msg, line, source: print(f"JS {level}: {msg} (line {line})"))
+            if self.debug
+            else lambda *args: None
         )
         self.browser.setPage(page)  # Use persistent profile
         right_layout.addWidget(self.subreddit_view)
