@@ -63,12 +63,10 @@ class PostWidget(QFrame):
         # Store post data
         self.post_data = post_data
 
-        # Store initial saved state and connect checkbox after setting initial state
+        # Store initial saved state and set checkbox state BEFORE connecting signal
         self.is_saved = False  # Will be set by parent widget
-        self.checkbox.setChecked(self.is_saved)  # Set initial state
-        self.checkbox.stateChanged.connect(
-            self.on_checkbox_changed
-        )  # Connect after setting initial state
+        # Connect signal AFTER setting initial state in parent widget
+        # The parent widget will call setup_checkbox_connection() after setting states
 
     def on_checkbox_changed(self, state):
         """Handle checkbox state changes"""
@@ -78,6 +76,10 @@ class PostWidget(QFrame):
         else:
             print("Unsaving post")
             self.main_window.unsave_post(self.post_data)
+
+    def setup_checkbox_connection(self):
+        """Connect checkbox signal after initial state is set"""
+        self.checkbox.stateChanged.connect(self.on_checkbox_changed)
 
 
 class SubredditView(QScrollArea):
@@ -104,6 +106,7 @@ class SubredditView(QScrollArea):
         post_widget = PostWidget(post_data, self.main_window)
         post_widget.is_saved = is_saved
         post_widget.checkbox.setChecked(is_saved)
+        post_widget.setup_checkbox_connection()  # Connect signal after setting states
         self.layout.addWidget(post_widget)
 
 
