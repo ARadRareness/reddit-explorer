@@ -1,5 +1,5 @@
 """
-Widget for displaying individual Reddit posts.
+Widget for displaying a single post.
 """
 
 from typing import Optional
@@ -10,8 +10,9 @@ from PySide6.QtWidgets import (
     QWidget,
     QCheckBox,
     QLabel,
+    QMenu,
 )
-from PySide6.QtCore import Qt, QEvent
+from PySide6.QtCore import Qt, QEvent, QPoint
 from PySide6.QtGui import QPixmap, QCursor
 from reddit_explorer.data.models import RedditPost
 from reddit_explorer.config.constants import IMAGE_MAX_WIDTH
@@ -49,6 +50,10 @@ class PostWidget(QFrame):
         self.setMouseTracking(True)
         # Make the widget clickable
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+
+        # Set context menu policy
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
 
         self._init_ui()
 
@@ -129,6 +134,11 @@ class PostWidget(QFrame):
         self.is_saved = False  # Will be set by parent widget
         self.show_in_categories = True  # Will be set by parent widget
 
+    def setup_checkbox_connections(self):
+        """Connect checkbox signals after initial states are set."""
+        self.added_checkbox.stateChanged.connect(self.on_added_checkbox_changed)
+        self.category_checkbox.stateChanged.connect(self.on_category_checkbox_changed)
+
     def on_added_checkbox_changed(self, state: int):
         """Handle added checkbox state changes."""
         if state == 2:
@@ -144,11 +154,6 @@ class PostWidget(QFrame):
             self.main_window.update_post_category_visibility(
                 self.post_data.id, state == 2
             )
-
-    def setup_checkbox_connections(self):
-        """Connect checkbox signals after initial states are set."""
-        self.added_checkbox.stateChanged.connect(self.on_added_checkbox_changed)
-        self.category_checkbox.stateChanged.connect(self.on_category_checkbox_changed)
 
     def mouseDoubleClickEvent(self, event: QEvent):
         """Handle double-click events to open post in browser."""
@@ -167,16 +172,6 @@ class PostWidget(QFrame):
         post_url = f"https://www.reddit.com/r/{self.post_data.subreddit}/comments/{self.post_data.id}"
 
         # Update category checkbox state
-        # cursor = self.main_window.db.get_cursor()
-        # cursor.execute(
-        #    "SELECT show_in_categories FROM saved_posts WHERE reddit_id = ?",
-        #    (self.post_data.id,),
-        # )
-        # result = cursor.fetchone()
-        # if result:
-        #    self.main_window.browser_category_checkbox.setChecked(bool(result[0]))
-        #    self.main_window.browser_category_checkbox.setEnabled(True)
-
         self.main_window.browser_category_checkbox.setChecked(True)
 
         # Show browser and navigation buttons
@@ -194,3 +189,46 @@ class PostWidget(QFrame):
     def leaveEvent(self, event: QEvent):
         """Handle mouse leave events."""
         self.setStyleSheet("")
+
+    def _show_context_menu(self, position: QPoint):
+        """Show context menu for post widget."""
+        if self.view_type != "category":
+            return
+
+        menu = QMenu()
+        set_category_action = menu.addAction("Set category")
+        action = menu.exec_(self.mapToGlobal(position))
+
+        if action == set_category_action:
+            self._show_category_menu()
+
+    def _show_category_menu(self):
+        """Show submenu to select category."""
+        # Get list of categories from database
+        cursor = self.main_window.db.get_cursor()
+        cursor.execute("SELECT name FROM categories ORDER BY name")
+        categories = [row[0] for row in cursor.fetchall()]
+
+        # Create menu
+        menu = QMenu()
+        for category in categories:
+            action = menu.addAction(category)
+            action.setData(category)
+
+        # Show menu at cursor position
+        action = menu.exec_(self.cursor().pos())
+        if action:
+            new_category = action.data()
+            cursor.execute(
+                "UPDATE saved_posts SET category = ? WHERE reddit_id = ?",
+                (new_category, self.post_data.id),
+            )
+            self.main_window.db.commit()
+
+            # Refresh the view - using public methods
+            self.main_window.refresh_category_counts()
+            if (
+                hasattr(self.main_window, "current_category")
+                and self.main_window.current_category
+            ):
+                self.main_window.load_category_posts(self.main_window.current_category)
