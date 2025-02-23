@@ -147,10 +147,21 @@ class RedditExplorer(QMainWindow):
         for row in cursor.fetchall():
             QTreeWidgetItem(self.subreddits_root, [row[0]])
 
-        # Load categories under categories root
-        cursor.execute("SELECT name FROM categories ORDER BY name")
+        # Load categories and their post counts under categories root
+        cursor.execute(
+            """
+            SELECT c.name, COUNT(sp.id) as post_count 
+            FROM categories c 
+            LEFT JOIN saved_posts sp ON sp.category = c.name AND sp.show_in_categories = 1
+            GROUP BY c.name 
+            ORDER BY c.name
+        """
+        )
         for row in cursor.fetchall():
-            QTreeWidgetItem(self.categories_root, [row[0]])
+            category_name = row[0]
+            post_count = row[1]
+            display_text = f"{category_name} ({post_count})"
+            QTreeWidgetItem(self.categories_root, [display_text])
 
         self.tree.expandAll()
 
@@ -203,7 +214,8 @@ class RedditExplorer(QMainWindow):
             subreddit_name = item.text(0)
             self._load_subreddit_posts(subreddit_name)
         elif parent.text(0) == "Categories":
-            category_name = item.text(0)
+            # Extract category name without post count
+            category_name = item.text(0).split(" (")[0]
             self._load_category_posts(category_name)
 
     def _load_subreddit_posts(self, subreddit_name: str):
@@ -391,6 +403,29 @@ class RedditExplorer(QMainWindow):
             if show_in_categories is not None:
                 self.browser_category_checkbox.setChecked(show_in_categories)
 
+    def _refresh_category_counts(self):
+        """Refresh the category counts in the tree widget."""
+        cursor = self.db.get_cursor()
+
+        # Get current category counts
+        cursor.execute(
+            """
+            SELECT c.name, COUNT(sp.id) as post_count 
+            FROM categories c 
+            LEFT JOIN saved_posts sp ON sp.category = c.name AND sp.show_in_categories = 1
+            GROUP BY c.name 
+            ORDER BY c.name
+            """
+        )
+        category_counts = {row[0]: row[1] for row in cursor.fetchall()}
+
+        # Update tree items
+        for i in range(self.categories_root.childCount()):
+            item = self.categories_root.child(i)
+            category_name = item.text(0).split(" (")[0]  # Get name without count
+            count = category_counts.get(category_name, 0)
+            item.setText(0, f"{category_name} ({count})")
+
     def _handle_browser_category_changed(self, state: int):
         """Handle category checkbox changes in browser view."""
         # Always update the database regardless of whether the post is in current_category_posts
@@ -405,7 +440,9 @@ class RedditExplorer(QMainWindow):
         show_in_categories = state == 2
         self.update_post_category_visibility(post.id, show_in_categories)
 
-    # Interface methods
+        # Refresh category counts after visibility change
+        self._refresh_category_counts()
+
     def save_post(self, post: RedditPost) -> None:
         """Save a post to the database."""
         cursor = self.db.get_cursor()
@@ -447,6 +484,9 @@ class RedditExplorer(QMainWindow):
             )
             self.db.commit()
 
+            # Refresh category counts after saving new post
+            self._refresh_category_counts()
+
         except sqlite3.IntegrityError:
             # Post already saved
             pass
@@ -456,6 +496,9 @@ class RedditExplorer(QMainWindow):
         cursor = self.db.get_cursor()
         cursor.execute("DELETE FROM saved_posts WHERE reddit_id = ?", (post.id,))
         self.db.commit()
+
+        # Refresh category counts after deleting the post
+        self._refresh_category_counts()
 
     def update_post_category_visibility(
         self, post_id: str, show_in_categories: bool
@@ -467,6 +510,9 @@ class RedditExplorer(QMainWindow):
             (1 if show_in_categories else 0, post_id),
         )
         self.db.commit()
+
+        # Refresh category counts after visibility change
+        self._refresh_category_counts()
 
     def add_subreddit(self, subreddit_name: str) -> None:
         """Add a new subreddit to database and tree."""
