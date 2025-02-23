@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QInputDialog,
     QMessageBox,
+    QProgressDialog,
 )
 from PySide6.QtCore import Qt, QPoint
 from reddit_explorer.data.models import RedditPost
@@ -209,6 +210,7 @@ class RedditExplorer(QMainWindow):
             rename_action = None
             remove_action = None
             uncategorize_action = None
+            analyze_action = menu.addAction("Analyze posts")
             set_desc_action = menu.addAction("Set description")
 
             # Don't allow renaming or removing Uncategorized
@@ -221,6 +223,8 @@ class RedditExplorer(QMainWindow):
 
             if action == set_desc_action:
                 self._set_category_description(category_name)
+            elif action == analyze_action:
+                self._analyze_category_posts(category_name)
             elif category_name != "Uncategorized":
                 if action == rename_action:
                     self._rename_category(item, category_name)
@@ -845,6 +849,81 @@ class RedditExplorer(QMainWindow):
             category_name = item.text(0).split(" (")[0]  # Get name without count
             count = category_counts.get(category_name, 0)
             item.setText(0, f"{category_name} ({count})")
+
+    def _analyze_category_posts(self, category_name: str):
+        """Analyze all unanalyzed posts in a category."""
+        cursor = self.db.get_cursor()
+
+        # Get all unanalyzed posts in the category
+        cursor.execute(
+            """
+            SELECT sp.reddit_id, s.name as subreddit_name
+            FROM saved_posts sp
+            JOIN subreddits s ON sp.subreddit_id = s.id
+            WHERE sp.category = ? AND sp.analysis IS NULL
+            """,
+            (category_name,),
+        )
+        posts = cursor.fetchall()
+
+        if not posts:
+            QMessageBox.information(
+                self,
+                "Analysis Complete",
+                "All posts in this category have already been analyzed.",
+            )
+            return
+
+        # Create progress dialog
+        progress = QProgressDialog("Analyzing posts...", "Cancel", 0, len(posts), self)
+        progress.setWindowTitle("Analyzing Posts")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)  # Show immediately
+
+        try:
+            # Analyze each post
+            for i, post in enumerate(posts):
+                if progress.wasCanceled():
+                    break
+
+                reddit_id = post[0]
+                subreddit_name = post[1]
+
+                # Update progress
+                progress.setValue(i)
+                progress.setLabelText(f"Analyzing post {i + 1} of {len(posts)}...")
+
+                # Fetch and store analysis
+                analysis = self.reddit_service.fetch_post_details(
+                    subreddit_name, reddit_id
+                )
+                cursor.execute(
+                    """
+                    UPDATE saved_posts 
+                    SET analysis = ?, analyzed_date = CURRENT_TIMESTAMP
+                    WHERE reddit_id = ?
+                    """,
+                    (analysis, reddit_id),
+                )
+                self.db.commit()
+
+            # Ensure progress dialog is closed
+            progress.setValue(len(posts))
+
+            if not progress.wasCanceled():
+                QMessageBox.information(
+                    self,
+                    "Analysis Complete",
+                    f"Successfully analyzed {len(posts)} posts in {category_name}.",
+                )
+
+        except Exception as e:
+            progress.cancel()  # Ensure progress dialog is closed on error
+            QMessageBox.warning(
+                self,
+                "Analysis Error",
+                f"An error occurred while analyzing posts: {str(e)}",
+            )
 
     @property
     def current_category(self) -> Optional[str]:
