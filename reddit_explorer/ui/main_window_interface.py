@@ -40,3 +40,16 @@ class MainWindowInterface(Protocol):
     ) -> None:
         """Update whether a post should be shown in categories view."""
         ...
+
+    def refresh_category_counts(self) -> None:
+        """Refresh the category counts in the tree widget."""
+        ...
+
+    def load_category_posts(self, category_name: str) -> None:
+        """Load and display posts from a specific category."""
+        ...
+
+    @property
+    def current_category(self) -> str:
+        """Get the current category name."""
+        ...

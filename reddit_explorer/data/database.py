@@ -25,6 +25,11 @@ class Database:
         """Create database schema if it doesn't exist."""
         cursor = self.conn.cursor()
 
+        # First check if we need to add the analysis columns
+        cursor.execute("PRAGMA table_info(saved_posts)")
+        columns = {row[1] for row in cursor.fetchall()}
+
+        # Create base schema
         cursor.executescript(
             """
             CREATE TABLE IF NOT EXISTS subreddits (
@@ -43,6 +48,8 @@ class Database:
                 show_in_categories BOOLEAN DEFAULT 1,
                 num_comments INTEGER DEFAULT 0,
                 added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                analysis TEXT,
+                analyzed_date TIMESTAMP,
                 FOREIGN KEY (subreddit_id) REFERENCES subreddits(id)
             );
             
@@ -61,6 +68,12 @@ class Database:
             );
         """
         )
+
+        # Add analysis columns if they don't exist
+        if "analysis" not in columns:
+            cursor.execute("ALTER TABLE saved_posts ADD COLUMN analysis TEXT")
+        if "analyzed_date" not in columns:
+            cursor.execute("ALTER TABLE saved_posts ADD COLUMN analyzed_date TIMESTAMP")
 
         # Ensure default category exists
         cursor.execute(
