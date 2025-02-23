@@ -18,6 +18,7 @@ class RedditPost:
     created_utc: float
     num_comments: int
     selftext: str = ""
+    content: Optional[str] = None
 
     @classmethod
     def from_api(cls, data: Dict[str, Any]) -> "RedditPost":
@@ -30,6 +31,7 @@ class RedditPost:
             created_utc=data["created_utc"],
             num_comments=data["num_comments"],
             selftext=data.get("selftext", ""),
+            content=data.get("content"),
         )
 
     @property

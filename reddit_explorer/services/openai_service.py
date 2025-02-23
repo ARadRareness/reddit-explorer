@@ -55,7 +55,7 @@ class OpenAIService:
         prompt: str,
         model: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
+        max_tokens: int = 1000,
     ) -> str:
         """
         Get a completion from OpenAI.
@@ -108,3 +108,14 @@ class OpenAIService:
         except openai.OpenAIError as e:
             print(f"OpenAI API error: {str(e)}")
             raise
+
+
+# test main
+
+if __name__ == "__main__":
+    openai_service = OpenAIService()
+    print(
+        openai_service.get_completion(
+            "You are a helpful assistant.", "What is the capital of France?"
+        )
+    )

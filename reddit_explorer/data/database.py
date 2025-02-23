@@ -48,8 +48,9 @@ class Database:
                 show_in_categories BOOLEAN DEFAULT 1,
                 num_comments INTEGER DEFAULT 0,
                 added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                analysis TEXT,
-                analyzed_date TIMESTAMP,
+                content TEXT,
+                content_date TIMESTAMP,
+                summary TEXT,
                 FOREIGN KEY (subreddit_id) REFERENCES subreddits(id)
             );
             
@@ -68,12 +69,6 @@ class Database:
             );
         """
         )
-
-        # Add analysis columns if they don't exist
-        if "analysis" not in columns:
-            cursor.execute("ALTER TABLE saved_posts ADD COLUMN analysis TEXT")
-        if "analyzed_date" not in columns:
-            cursor.execute("ALTER TABLE saved_posts ADD COLUMN analyzed_date TIMESTAMP")
 
         # Ensure default category exists
         cursor.execute(

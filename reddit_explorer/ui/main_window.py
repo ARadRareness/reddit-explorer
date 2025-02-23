@@ -26,6 +26,7 @@ from reddit_explorer.data.models import RedditPost
 from reddit_explorer.data.database import Database
 from reddit_explorer.services.reddit_service import RedditService
 from reddit_explorer.services.image_service import ImageService
+from reddit_explorer.services.ai_service import AIService
 from reddit_explorer.ui.browser.browser_view import BrowserView
 from reddit_explorer.ui.widgets.subreddit_view import SubredditView
 from reddit_explorer.ui.main_window_interface import MainWindowInterface
@@ -47,6 +48,7 @@ class RedditExplorer(QMainWindow):
         self.db = Database()
         self.reddit_service = RedditService()
         self.image_service = ImageService()
+        self.ai_service = AIService()
 
         # Initialize UI
         self._init_ui()
@@ -210,7 +212,9 @@ class RedditExplorer(QMainWindow):
             rename_action = None
             remove_action = None
             uncategorize_action = None
-            analyze_action = menu.addAction("Analyze posts")
+            auto_categorize_action = menu.addAction("Analyze categories")
+            analyze_action = menu.addAction("Download posts")
+            set_desc_action = menu.addSeparator()
             set_desc_action = menu.addAction("Set description")
 
             # Don't allow renaming or removing Uncategorized
@@ -225,6 +229,8 @@ class RedditExplorer(QMainWindow):
                 self._set_category_description(category_name)
             elif action == analyze_action:
                 self._analyze_category_posts(category_name)
+            elif action == auto_categorize_action:
+                self._auto_categorize_posts(category_name)
             elif category_name != "Uncategorized":
                 if action == rename_action:
                     self._rename_category(item, category_name)
@@ -237,14 +243,19 @@ class RedditExplorer(QMainWindow):
         # Handle right-click on subreddit items
         if parent and parent.text(0) == "Subreddits":
             subreddit_name = item.text(0)
+            show_200_action = menu.addAction("Show 200")
+            menu.addSeparator()
             rename_action = menu.addAction("Rename")
             remove_action = menu.addAction("Remove")
+
             action = menu.exec_(self.tree.viewport().mapToGlobal(position))
 
             if action == remove_action:
                 self._remove_subreddit(subreddit_name)
             elif action == rename_action:
                 self._rename_subreddit(item, subreddit_name)
+            elif action == show_200_action:
+                self._load_subreddit_posts_fixed(subreddit_name, 200)
 
     def _add_category(self):
         """Show dialog to add a new category."""
@@ -369,20 +380,29 @@ class RedditExplorer(QMainWindow):
         # Fetch posts from Reddit
         posts = self.reddit_service.fetch_all_subreddit_posts(subreddit_name)
 
-        # Add posts to view
-        total_posts = 0
+        # First find the most recent saved post
+        posts_to_show = []
         found_saved = False
         for post in posts:
             is_saved = post.id in saved_posts
-            self.subreddit_view.add_post(post, is_saved, view_type="subreddit")
-            total_posts += 1
+            posts_to_show.append(post)
 
             if is_saved:  # Stop if we found a saved post
                 found_saved = True
                 break
 
-            if total_posts >= 400:  # Also stop if we hit the limit
+            if len(posts_to_show) >= 200:  # Also stop if we hit the limit
                 break
+
+        # Now reverse the posts we want to show
+        posts_to_show.reverse()
+
+        # Add posts to view
+        total_posts = 0
+        for post in posts_to_show:
+            is_saved = post.id in saved_posts
+            self.subreddit_view.add_post(post, is_saved, view_type="subreddit")
+            total_posts += 1
 
         # Update window title with post count
         self.setWindowTitle(f"Reddit Explorer ({total_posts} posts)")
@@ -860,7 +880,7 @@ class RedditExplorer(QMainWindow):
             SELECT sp.reddit_id, s.name as subreddit_name
             FROM saved_posts sp
             JOIN subreddits s ON sp.subreddit_id = s.id
-            WHERE sp.category = ? AND sp.analysis IS NULL
+            WHERE sp.category = ? AND sp.content IS NULL
             """,
             (category_name,),
         )
@@ -869,14 +889,16 @@ class RedditExplorer(QMainWindow):
         if not posts:
             QMessageBox.information(
                 self,
-                "Analysis Complete",
-                "All posts in this category have already been analyzed.",
+                "Download Complete",
+                "All posts in this category have already been downloaded.",
             )
             return
 
         # Create progress dialog
-        progress = QProgressDialog("Analyzing posts...", "Cancel", 0, len(posts), self)
-        progress.setWindowTitle("Analyzing Posts")
+        progress = QProgressDialog(
+            "Downloading posts...", "Cancel", 0, len(posts), self
+        )
+        progress.setWindowTitle("Downloading Posts")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)  # Show immediately
 
@@ -891,7 +913,7 @@ class RedditExplorer(QMainWindow):
 
                 # Update progress
                 progress.setValue(i)
-                progress.setLabelText(f"Analyzing post {i + 1} of {len(posts)}...")
+                progress.setLabelText(f"Downloading post {i + 1} of {len(posts)}...")
 
                 # Fetch and store analysis
                 analysis = self.reddit_service.fetch_post_details(
@@ -900,7 +922,7 @@ class RedditExplorer(QMainWindow):
                 cursor.execute(
                     """
                     UPDATE saved_posts 
-                    SET analysis = ?, analyzed_date = CURRENT_TIMESTAMP
+                    SET content = ?, content_date = CURRENT_TIMESTAMP
                     WHERE reddit_id = ?
                     """,
                     (analysis, reddit_id),
@@ -913,16 +935,173 @@ class RedditExplorer(QMainWindow):
             if not progress.wasCanceled():
                 QMessageBox.information(
                     self,
-                    "Analysis Complete",
-                    f"Successfully analyzed {len(posts)} posts in {category_name}.",
+                    "Download Complete",
+                    f"Successfully downloaded {len(posts)} posts in {category_name}.",
                 )
 
         except Exception as e:
             progress.cancel()  # Ensure progress dialog is closed on error
             QMessageBox.warning(
                 self,
-                "Analysis Error",
-                f"An error occurred while analyzing posts: {str(e)}",
+                "Download Error",
+                f"An error occurred while downloading posts: {str(e)}",
+            )
+
+    def _auto_categorize_posts(self, category_name: str):
+        """Auto-categorize all analyzed posts in a category using AI."""
+        cursor = self.db.get_cursor()
+
+        # First check for any undownloaded posts
+        cursor.execute(
+            """
+            SELECT sp.reddit_id, s.name as subreddit_name
+            FROM saved_posts sp
+            JOIN subreddits s ON sp.subreddit_id = s.id
+            WHERE sp.category = ? AND sp.content IS NULL
+            """,
+            (category_name,),
+        )
+        undownloaded_posts = cursor.fetchall()
+
+        # If there are undownloaded posts, download them first
+        if undownloaded_posts:
+            # Create progress dialog for downloading
+            download_progress = QProgressDialog(
+                "Downloading posts...", "Cancel", 0, len(undownloaded_posts), self
+            )
+            download_progress.setWindowTitle("Downloading Posts")
+            download_progress.setWindowModality(Qt.WindowModality.WindowModal)
+            download_progress.setMinimumDuration(0)
+
+            try:
+                # Download each post
+                for i, post in enumerate(undownloaded_posts):
+                    if download_progress.wasCanceled():
+                        return
+
+                    reddit_id = post[0]
+                    subreddit_name = post[1]
+
+                    # Update progress
+                    download_progress.setValue(i)
+                    download_progress.setLabelText(
+                        f"Downloading post {i + 1} of {len(undownloaded_posts)}..."
+                    )
+
+                    # Fetch and store content
+                    content = self.reddit_service.fetch_post_details(
+                        subreddit_name, reddit_id
+                    )
+                    cursor.execute(
+                        """
+                        UPDATE saved_posts 
+                        SET content = ?, content_date = CURRENT_TIMESTAMP
+                        WHERE reddit_id = ?
+                        """,
+                        (content, reddit_id),
+                    )
+                    self.db.commit()
+
+                download_progress.setValue(len(undownloaded_posts))
+
+            except Exception as e:
+                download_progress.cancel()
+                QMessageBox.warning(
+                    self,
+                    "Download Error",
+                    f"An error occurred while downloading posts: {str(e)}",
+                )
+                return
+
+        # Now get all posts with content for categorization
+        cursor.execute(
+            """
+            SELECT sp.reddit_id, sp.title, sp.content, s.name as subreddit_name, sp.summary
+            FROM saved_posts sp
+            JOIN subreddits s ON sp.subreddit_id = s.id
+            WHERE sp.category = ? AND sp.content IS NOT NULL
+            """,
+            (category_name,),
+        )
+        posts = cursor.fetchall()
+
+        if not posts:
+            QMessageBox.information(
+                self,
+                "Auto-categorize",
+                "No posts found to categorize in this category.",
+            )
+            return
+
+        # Get all categories and their descriptions
+        cursor.execute("SELECT name, description FROM categories")
+        categories = {row[0]: row[1] for row in cursor.fetchall()}
+
+        # Create progress dialog for categorization
+        progress = QProgressDialog(
+            "Auto-categorizing posts...", "Cancel", 0, len(posts), self
+        )
+        progress.setWindowTitle("Auto-categorizing Posts")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+
+        try:
+            # Process each post
+            for i, post_data in enumerate(posts):
+                if progress.wasCanceled():
+                    break
+
+                # Update progress
+                progress.setValue(i)
+                progress.setLabelText(f"Categorizing post {i + 1} of {len(posts)}...")
+
+                # Create RedditPost object
+                post = RedditPost(
+                    id=post_data[0],
+                    title=post_data[1],
+                    content=post_data[2] or "",  # Use content for categorization
+                    subreddit=post_data[3],
+                    created_utc=datetime.now().timestamp(),  # Not important for categorization
+                    num_comments=0,  # Not important for categorization
+                    url="",  # Not important for categorization
+                )
+
+                # Get AI suggestion, using existing summary if available
+                suggested_category, summary = self.ai_service.categorize_post(
+                    post, categories, post_data[4]
+                )
+
+                # Update category and summary if different
+                if suggested_category != category_name or not post_data[4]:
+                    cursor.execute(
+                        "UPDATE saved_posts SET category = ?, summary = ? WHERE reddit_id = ?",
+                        (suggested_category, summary, post.id),
+                    )
+                    self.db.commit()
+
+            # Ensure progress dialog is closed
+            progress.setValue(len(posts))
+
+            if not progress.wasCanceled():
+                # Refresh category counts
+                self.refresh_category_counts()
+
+                # If we're currently viewing this category, reload it
+                if self.current_category == category_name:
+                    self.load_category_posts(category_name)
+
+                QMessageBox.information(
+                    self,
+                    "Auto-categorize Complete",
+                    f"Successfully processed {len(posts)} posts.",
+                )
+
+        except Exception as e:
+            progress.cancel()  # Ensure progress dialog is closed on error
+            QMessageBox.warning(
+                self,
+                "Auto-categorize Error",
+                f"An error occurred while categorizing posts: {str(e)}",
             )
 
     @property
@@ -934,3 +1113,53 @@ class RedditExplorer(QMainWindow):
     def current_category(self, value: Optional[str]):
         """Set the current category name."""
         self._current_category = value
+
+    def _load_subreddit_posts_fixed(self, subreddit_name: str, post_count: int):
+        """
+        Load and display a fixed number of posts from a subreddit.
+
+        Args:
+            subreddit_name: Name of the subreddit
+            post_count: Number of posts to display
+        """
+        # Clear and hide browser and navigation buttons, show subreddit view
+        self.browser.hide()
+        self.nav_buttons.hide()
+        self.subreddit_view.show()
+        self.subreddit_view.clear()
+
+        # Reset window title
+        self.setWindowTitle("Reddit Explorer")
+
+        # Get list of saved post IDs for this subreddit
+        cursor = self.db.get_cursor()
+        cursor.execute(
+            """
+            SELECT reddit_id FROM saved_posts sp
+            JOIN subreddits s ON sp.subreddit_id = s.id
+            WHERE s.name = ?
+            """,
+            (subreddit_name,),
+        )
+        saved_posts = {row[0] for row in cursor.fetchall()}
+
+        # Fetch posts from Reddit
+        posts = self.reddit_service.fetch_all_subreddit_posts(
+            subreddit_name, post_count
+        )
+
+        # Reverse posts to show oldest first
+        posts.reverse()
+
+        # Add posts to view
+        total_posts = 0
+        for post in posts:
+            is_saved = post.id in saved_posts
+            self.subreddit_view.add_post(post, is_saved, view_type="subreddit")
+            total_posts += 1
+
+            if total_posts >= post_count:  # Stop when we hit the requested count
+                break
+
+        # Update window title with post count
+        self.setWindowTitle(f"Reddit Explorer ({total_posts} posts)")
