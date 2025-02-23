@@ -48,7 +48,8 @@ class Database:
             
             CREATE TABLE IF NOT EXISTS categories (
                 id INTEGER PRIMARY KEY,
-                name TEXT UNIQUE
+                name TEXT UNIQUE,
+                description TEXT
             );
             
             CREATE TABLE IF NOT EXISTS cached_images (

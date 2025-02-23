@@ -192,8 +192,18 @@ class RedditExplorer(QMainWindow):
                 self._add_category()
             return
 
-        # Handle right-click on subreddit items
+        # Handle right-click on category items
         parent = item.parent()
+        if parent and parent.text(0) == "Categories":
+            set_desc_action = menu.addAction("Set description")
+            action = menu.exec_(self.tree.viewport().mapToGlobal(position))
+
+            if action == set_desc_action:
+                category_name = item.text(0).split(" (")[0]
+                self._set_category_description(category_name)
+            return
+
+        # Handle right-click on subreddit items
         if parent and parent.text(0) == "Subreddits":
             remove_action = menu.addAction("Remove")
             action = menu.exec_(self.tree.viewport().mapToGlobal(position))
@@ -242,6 +252,33 @@ class RedditExplorer(QMainWindow):
             except sqlite3.IntegrityError:
                 # Category already exists
                 pass
+
+    def _set_category_description(self, category_name: str):
+        """Show dialog to set category description."""
+        cursor = self.db.get_cursor()
+
+        # Get current description
+        cursor.execute(
+            "SELECT description FROM categories WHERE name = ?", (category_name,)
+        )
+        result = cursor.fetchone()
+        current_desc = result[0] if result and result[0] else ""
+
+        # Show dialog with current description
+        desc, ok = QInputDialog.getMultiLineText(
+            self,
+            "Set Category Description",
+            "Enter description for category:",
+            current_desc,
+        )
+
+        if ok:
+            # Update description in database
+            cursor.execute(
+                "UPDATE categories SET description = ? WHERE name = ?",
+                (desc.strip() if desc else None, category_name),
+            )
+            self.db.commit()
 
     def _remove_subreddit(self, subreddit_name: str):
         """Remove a subreddit from database and tree."""
@@ -323,9 +360,6 @@ class RedditExplorer(QMainWindow):
         self.subreddit_view.show()
         self.subreddit_view.clear()
 
-        # Reset window title
-        self.setWindowTitle("Reddit Explorer")
-
         # Store category name for navigation
         self.current_category = category_name
         self.current_category_posts = []
@@ -384,7 +418,7 @@ class RedditExplorer(QMainWindow):
             )
             total_posts += 1
 
-        # Update window title with post count
+        # Update window title with post count only
         self.setWindowTitle(f"Reddit Explorer ({total_posts} posts)")
 
     def _handle_next_click(self):

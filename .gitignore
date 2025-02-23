@@ -36,4 +36,7 @@ ENV/
 
 # OS specific
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+browser_data
+image_cache

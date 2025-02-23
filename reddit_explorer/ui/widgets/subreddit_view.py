@@ -3,7 +3,12 @@ Widget for displaying subreddit posts.
 """
 
 from typing import Optional
-from PySide6.QtWidgets import QScrollArea, QWidget, QVBoxLayout
+from PySide6.QtWidgets import (
+    QScrollArea,
+    QWidget,
+    QVBoxLayout,
+    QLabel,
+)
 from reddit_explorer.data.models import RedditPost
 from reddit_explorer.ui.main_window_interface import MainWindowInterface
 from reddit_explorer.ui.widgets.post_widget import PostWidget
@@ -37,6 +42,29 @@ class SubredditView(QScrollArea):
             child = self._layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
+
+    def add_description(self, description: str):
+        """
+        Add a category description to the view.
+
+        Args:
+            description: The category description text
+        """
+        # Create description label with some styling
+        desc_label = QLabel(description)
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet(
+            """
+            QLabel {
+                background-color: #f0f0f0;
+                padding: 10px;
+                border-radius: 5px;
+                margin: 5px;
+                font-style: italic;
+            }
+        """
+        )
+        self._layout.addWidget(desc_label)
 
     def add_post(
         self,
