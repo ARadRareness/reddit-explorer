@@ -238,10 +238,13 @@ class RedditExplorer(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         layout = QHBoxLayout(main_widget)
+        layout.setContentsMargins(8, 8, 8, 8)  # Set consistent margins
+        layout.setSpacing(8)  # Set spacing between panels
 
         # Left panel (Explorer)
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)  # Remove internal margins
         left_panel.setSizePolicy(
             QSizePolicy.Fixed, QSizePolicy.Expanding
         )  # Fixed width, expands vertically
@@ -437,6 +440,9 @@ class RedditExplorer(QMainWindow):
             self.subreddit_view.show()
             self.subreddit_view.clear()
 
+            # Reset window title
+            self.setWindowTitle("Reddit Explorer")
+
             # Get list of saved post IDs for this subreddit
             cursor = self.conn.cursor()
             cursor.execute(
@@ -492,6 +498,9 @@ class RedditExplorer(QMainWindow):
                     if total_posts >= MAX_POSTS:  # Stop if we hit the limit
                         break
 
+                # Update window title with post count
+                self.setWindowTitle(f"Reddit Explorer ({total_posts} posts)")
+
         except requests.RequestException as e:
             print(f"Error fetching subreddit posts: {e}")
             # TODO: Add proper error handling/user notification
@@ -504,6 +513,9 @@ class RedditExplorer(QMainWindow):
             self.nav_buttons.hide()
             self.subreddit_view.show()
             self.subreddit_view.clear()
+
+            # Reset window title
+            self.setWindowTitle("Reddit Explorer")
 
             # Store category name for navigation
             self.current_category = category_name
@@ -526,6 +538,7 @@ class RedditExplorer(QMainWindow):
                 (category_name,),
             )
 
+            total_posts = 0
             for row in cursor.fetchall():
                 # Parse the datetime string from SQLite
                 added_date = (
@@ -554,6 +567,10 @@ class RedditExplorer(QMainWindow):
                     show_in_categories=True,
                     view_type="category",
                 )
+                total_posts += 1
+
+            # Update window title with post count
+            self.setWindowTitle(f"Reddit Explorer ({total_posts} posts)")
 
         except sqlite3.Error as e:
             print(f"Error loading category posts: {e}")
@@ -705,6 +722,9 @@ class RedditExplorer(QMainWindow):
         self.browser.hide()
         self.nav_buttons.hide()
         self.subreddit_view.show()
+
+        # Reset window title
+        self.setWindowTitle("Reddit Explorer")
 
         # Clear browser URL to prevent memory usage
         self.browser.setUrl("")
