@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QCheckBox,
     QLabel,
+    QMenu,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import Qt
@@ -131,6 +132,13 @@ class SubredditView(QScrollArea):
         post_widget.setup_checkbox_connection()  # Connect signal after setting states
         self.layout.addWidget(post_widget)
 
+        # Scroll to bottom after adding the post
+        self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+
+    def scroll_to_bottom(self):
+        """Scroll to the bottom of the view"""
+        self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+
 
 class RedditExplorer(QMainWindow):
     def __init__(self):
@@ -156,6 +164,8 @@ class RedditExplorer(QMainWindow):
         # Tree widget for subreddits and categories
         self.tree = QTreeWidget()
         self.tree.setHeaderLabel("Explorer")
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self.show_context_menu)
         left_layout.addWidget(self.tree)
 
         # Right panel (Browser)
@@ -350,17 +360,31 @@ class RedditExplorer(QMainWindow):
         """Save a post to the database"""
         cursor = self.conn.cursor()
 
-        # Get subreddit id
+        # Get subreddit id - using case-insensitive comparison
         cursor.execute(
-            "SELECT id FROM subreddits WHERE name = ?", (post_data["subreddit"],)
+            "SELECT id FROM subreddits WHERE LOWER(name) = LOWER(?)",
+            (post_data["subreddit"],),
         )
         result = cursor.fetchone()
         if not result:
-            # Add subreddit if it doesn't exist
+            # Add subreddit if it doesn't exist - use the original case from our tree widget
+            root = self.tree.findItems("Subreddits", Qt.MatchExactly)[0]
+            existing_subreddit = None
+            for i in range(root.childCount()):
+                if root.child(i).text(0).lower() == post_data["subreddit"].lower():
+                    existing_subreddit = root.child(i).text(0)
+                    break
+
+            # If we found a matching subreddit, use its case, otherwise use the post's case
+            subreddit_name = existing_subreddit or post_data["subreddit"]
             cursor.execute(
-                "INSERT INTO subreddits (name) VALUES (?)", (post_data["subreddit"],)
+                "INSERT INTO subreddits (name) VALUES (?)", (subreddit_name,)
             )
             subreddit_id = cursor.lastrowid
+
+            # Add to tree if it's a new subreddit
+            if not existing_subreddit:
+                QTreeWidgetItem(self.subreddits_root, [subreddit_name])
         else:
             subreddit_id = result[0]
 
@@ -438,6 +462,36 @@ class RedditExplorer(QMainWindow):
         except Exception as e:
             print(f"Error caching image: {e}")
             return None
+
+    def show_context_menu(self, position):
+        """Show context menu for tree items"""
+        item = self.tree.itemAt(position)
+        if not item:
+            return
+
+        # Only show menu for subreddit items
+        parent = item.parent()
+        if parent and parent.text(0) == "Subreddits":
+            menu = QMenu()
+            remove_action = menu.addAction("Remove")
+            action = menu.exec_(self.tree.viewport().mapToGlobal(position))
+
+            if action == remove_action:
+                self.remove_subreddit(item.text(0))
+
+    def remove_subreddit(self, subreddit_name):
+        """Remove a subreddit from database and tree"""
+        # Remove from database
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM subreddits WHERE name = ?", (subreddit_name,))
+        self.conn.commit()
+
+        # Remove from tree
+        root = self.tree.findItems("Subreddits", Qt.MatchExactly)[0]
+        for i in range(root.childCount()):
+            if root.child(i).text(0) == subreddit_name:
+                root.removeChild(root.child(i))
+                break
 
 
 if __name__ == "__main__":
