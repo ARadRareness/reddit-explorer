@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 import sqlite3
@@ -234,6 +235,19 @@ class RedditExplorer(QMainWindow):
         )
         os.makedirs(self.cache_dir, exist_ok=True)
 
+        # Create browser data directory for persistent storage
+        self.browser_data_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "browser_data"
+        )
+        os.makedirs(self.browser_data_dir, exist_ok=True)
+
+        # Set up persistent web profile
+        self.web_profile = QWebEngineProfile("reddit_explorer", self)
+        self.web_profile.setPersistentStoragePath(self.browser_data_dir)
+        self.web_profile.setPersistentCookiesPolicy(
+            QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies
+        )
+
         # Main layout
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -310,6 +324,9 @@ class RedditExplorer(QMainWindow):
         # Replace browser with subreddit view
         self.subreddit_view = SubredditView(self)
         self.browser = QWebEngineView()
+        self.browser.setPage(
+            QWebEnginePage(self.web_profile, self.browser)
+        )  # Use persistent profile
         right_layout.addWidget(self.subreddit_view)
         right_layout.addWidget(self.browser)
         self.browser.hide()  # Hide browser initially
