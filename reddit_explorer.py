@@ -242,16 +242,30 @@ class RedditExplorer(QMainWindow):
         # Left panel (Explorer)
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
+        left_panel.setSizePolicy(
+            QSizePolicy.Fixed, QSizePolicy.Expanding
+        )  # Fixed width, expands vertically
 
         # Tree widget for subreddits and categories
         self.tree = QTreeWidget()
         self.tree.setHeaderLabel("Explorer")
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.show_context_menu)
+
+        # Make tree more compact horizontally
+        self.tree.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self.tree.setMinimumWidth(150)  # Set minimum width
+        self.tree.setMaximumWidth(
+            250
+        )  # Set maximum width to prevent excessive stretching
+
         left_layout.addWidget(self.tree)
 
         # Right panel (Browser)
         right_panel = QWidget()
+        right_panel.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Expanding
+        )  # Expand in both directions
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
 
@@ -297,9 +311,11 @@ class RedditExplorer(QMainWindow):
         right_layout.addWidget(self.browser)
         self.browser.hide()  # Hide browser initially
 
-        # Add panels to main layout
-        layout.addWidget(left_panel, 1)  # 1 is the stretch factor
-        layout.addWidget(right_panel, 2)  # 2 is the stretch factor
+        # Add panels to main layout with appropriate stretch factors
+        layout.addWidget(left_panel, 0)  # Stretch factor 0 means no stretch
+        layout.addWidget(
+            right_panel, 1
+        )  # Stretch factor 1 means it will take up remaining space
 
         self.init_database()
         self.setup_connections()
