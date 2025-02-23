@@ -171,6 +171,12 @@ class PostWidget(QFrame):
         self.main_window.nav_buttons.show()
         self.main_window.subreddit_view.hide()
         self.main_window.browser.setUrl(post_url)
+        # Run the script to hide the sidebar after page loads
+        self.main_window.browser.page().loadFinished.connect(
+            lambda ok: self.main_window.browser.page().runJavaScript(
+                self.main_window.hide_sidebar_script
+            )
+        )
 
     def enterEvent(self, event):
         """Handle mouse enter events"""
@@ -248,6 +254,114 @@ class RedditExplorer(QMainWindow):
             QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies
         )
 
+        # JavaScript to hide right sidebar
+        self.hide_sidebar_script = """
+            function adjustLayout() {
+                console.log('Adjusting layout...');
+                
+                // Debug DOM structure
+                console.log('Document body:', document.body.innerHTML.substring(0, 500));
+                
+                // Remove top header
+                const header = document.querySelector('header');
+                if (header) {
+                    console.log('Found header:', header.className);
+                    header.remove();
+                    console.log('Header removed');
+                }
+                
+                // Remove back button
+                const backButton = document.querySelector('pdp-back-button');
+                if (backButton) {
+                    console.log('Found back button:', backButton.className);
+                    backButton.remove();
+                    console.log('Back button removed');
+                }
+                
+                // Try to find the left nav container using both tag name and ID
+                const leftNavContainer = document.querySelector('flex-left-nav-container#left-sidebar-container') || 
+                                      document.getElementById('left-sidebar-container') ||
+                                      document.querySelector('flex-left-nav-container');
+                
+                console.log('Left nav container:', leftNavContainer);
+                
+                if (leftNavContainer) {
+                    console.log('Found left nav container with classes:', leftNavContainer.className);
+                    // Try to find the parent container that might be the flex wrapper
+                    const parentContainer = leftNavContainer.parentElement;
+                    console.log('Parent container:', parentContainer);
+                    if (parentContainer) {
+                        console.log('Parent container classes:', parentContainer.className);
+                        // If parent is a flex container, remove it
+                        if (parentContainer.className.includes('flex')) {
+                            console.log('Removing parent container');
+                            parentContainer.remove();
+                        } else {
+                            // Otherwise just remove the nav container
+                            console.log('Removing nav container');
+                            leftNavContainer.remove();
+                        }
+                    }
+                }
+                
+                // Find and adjust main content
+                const subgridContainer = document.getElementById('subgrid-container');
+                const mainContainer = document.querySelector('.main-container');
+                const mainElement = document.querySelector('.main');
+                
+                console.log('Main elements:', {
+                    subgridContainer: subgridContainer?.className,
+                    mainContainer: mainContainer?.className,
+                    mainElement: mainElement?.className
+                });
+                
+                if (mainElement) {
+                    console.log('Found main element, moving to top of document...');
+                    
+                    // Move main element to be the first child of body
+                    document.body.insertBefore(mainElement, document.body.firstChild);
+                    
+                    // Remove the containers if they exist
+                    if (mainContainer) mainContainer.remove();
+                    if (subgridContainer) subgridContainer.remove();
+                    
+                    // Add style to ensure main takes full width and adjust for removed header
+                    const style = document.createElement('style');
+                    style.textContent = `
+                        @media (min-width: 768px) {
+                            body {
+                                padding-top: 0 !important;
+                                margin: 0 !important;
+                                overflow-x: hidden !important;
+                            }
+                            .main {
+                                width: 100% !important;
+                                max-width: 100% !important;
+                                box-sizing: border-box !important;
+                                padding: 24px 24px 0 24px !important;
+                                margin: 0 !important;
+                                display: block !important;
+                                overflow-x: hidden !important;
+                            }
+                        }
+                    `;
+                    document.head.appendChild(style);
+                    console.log('Layout adjusted');
+                } else {
+                    console.log('Could not find main element');
+                }
+            }
+            
+            // Run immediately and after increasing delays
+            adjustLayout();
+            [1000, 2000, 3000, 4000, 5000].forEach((delay) => {
+                setTimeout(() => {
+                    console.log(`Retrying after ${delay}ms...`);
+                    adjustLayout();
+                }, delay);
+            });
+        """
+
         # Main layout
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -324,9 +438,12 @@ class RedditExplorer(QMainWindow):
         # Replace browser with subreddit view
         self.subreddit_view = SubredditView(self)
         self.browser = QWebEngineView()
-        self.browser.setPage(
-            QWebEnginePage(self.web_profile, self.browser)
-        )  # Use persistent profile
+        page = QWebEnginePage(self.web_profile, self.browser)
+        # Add console message handler
+        page.javaScriptConsoleMessage = lambda level, msg, line, source: print(
+            f"JS {level}: {msg} (line {line})"
+        )
+        self.browser.setPage(page)  # Use persistent profile
         right_layout.addWidget(self.subreddit_view)
         right_layout.addWidget(self.browser)
         self.browser.hide()  # Hide browser initially
@@ -799,6 +916,10 @@ class RedditExplorer(QMainWindow):
         # Construct and load Reddit post URL
         post_url = f"https://www.reddit.com/r/{post_data['subreddit']}/comments/{post_data['id']}"
         self.browser.setUrl(post_url)
+        # Run the script to hide the sidebar after page loads
+        self.browser.page().loadFinished.connect(
+            lambda ok: self.browser.page().runJavaScript(self.hide_sidebar_script)
+        )
 
 
 if __name__ == "__main__":
