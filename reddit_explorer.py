@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
+from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage, QWebEngineScript
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 import sqlite3
@@ -254,7 +254,55 @@ class RedditExplorer(QMainWindow):
             QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies
         )
 
-        # JavaScript to hide right sidebar
+        # Initial script to hide content
+        self.initial_hide_script = """
+            (function() {
+                function injectStyle() {
+                    try {
+                        // Try to create and inject style
+                        const style = document.createElement('style');
+                        style.id = 'reddit-explorer-initial-hide';
+                        style.textContent = `
+                            /* Hide everything immediately */
+                            html.reddit-explorer-loading,
+                            html.reddit-explorer-loading body {
+                                display: none !important;
+                            }
+                        `;
+                        
+                        const target = document.head || document.documentElement;
+                        if (target) {
+                            target.appendChild(style);
+                            // Add class to html element to activate the style
+                            document.documentElement.classList.add('reddit-explorer-loading');
+                            return true;
+                        }
+                    } catch (e) {
+                        console.log('Failed to inject style:', e);
+                    }
+                    return false;
+                }
+
+                // Try to inject immediately
+                if (!injectStyle()) {
+                    // If failed, try again when readyState changes
+                    const observer = new MutationObserver((mutations, obs) => {
+                        if (document.documentElement) {
+                            injectStyle();
+                            obs.disconnect(); // Stop observing once we succeed
+                        }
+                    });
+                    
+                    // Start observing document for when documentElement becomes available
+                    observer.observe(document, {
+                        childList: true,
+                        subtree: true
+                    });
+                }
+            })();
+        """
+
+        # JavaScript to hide right sidebar and show content
         self.hide_sidebar_script = """
             function adjustLayout() {
                 console.log('Adjusting layout...');
@@ -347,6 +395,9 @@ class RedditExplorer(QMainWindow):
                     `;
                     document.head.appendChild(style);
                     console.log('Layout adjusted');
+
+                    // Show content with a smooth transition
+                    document.documentElement.classList.remove('reddit-explorer-loading');
                 } else {
                     console.log('Could not find main element');
                 }
@@ -439,6 +490,20 @@ class RedditExplorer(QMainWindow):
         self.subreddit_view = SubredditView(self)
         self.browser = QWebEngineView()
         page = QWebEnginePage(self.web_profile, self.browser)
+
+        # Add script to hide content before page loads
+        script = QWebEngineScript()
+        script.setName("HideContent")
+        script.setSourceCode(self.initial_hide_script)
+        script.setInjectionPoint(
+            QWebEngineScript.DocumentCreation
+        )  # Enum value directly from QWebEngineScript
+        script.setWorldId(
+            QWebEngineScript.MainWorld
+        )  # Enum value directly from QWebEngineScript
+        script.setRunsOnSubFrames(True)
+        self.web_profile.scripts().insert(script)
+
         # Add console message handler
         page.javaScriptConsoleMessage = lambda level, msg, line, source: print(
             f"JS {level}: {msg} (line {line})"
