@@ -141,8 +141,29 @@ class PostWidget(QFrame):
 
     def mouseDoubleClickEvent(self, event):
         """Handle double-click events to open post in browser"""
+        # Get the post index if we're in a category
+        if self.view_type == "category":
+            for i, post in enumerate(self.main_window.current_category_posts):
+                if post["id"] == self.post_data["id"]:
+                    self.main_window.current_post_index = i
+                    # Enable/disable Next button based on position
+                    self.main_window.next_btn.setEnabled(
+                        i < len(self.main_window.current_category_posts) - 1
+                    )
+                    break
+
         # Construct Reddit post URL
         post_url = f"https://www.reddit.com/r/{self.post_data['subreddit']}/comments/{self.post_data['id']}"
+
+        # Update category checkbox state
+        cursor = self.main_window.conn.cursor()
+        cursor.execute(
+            "SELECT show_in_categories FROM saved_posts WHERE reddit_id = ?",
+            (self.post_data["id"],),
+        )
+        result = cursor.fetchone()
+        if result:
+            self.main_window.browser_category_checkbox.setChecked(bool(result[0]))
 
         # Show browser and navigation buttons
         self.main_window.browser.show()
@@ -243,24 +264,31 @@ class RedditExplorer(QMainWindow):
         nav_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
         nav_layout.setSpacing(4)  # Reduce spacing between buttons
 
-        # Create and style buttons
-        self.back_btn = QPushButton("Back")
-        self.forward_btn = QPushButton("Forward")
+        # Create navigation buttons and checkbox
         self.done_btn = QPushButton("Done")
+        self.next_btn = QPushButton("Next")
+        self.browser_category_checkbox = QCheckBox("Show in categories")
+        self.browser_category_checkbox.setToolTip("Show post in categories view")
 
-        # Set fixed height for all buttons
-        for btn in [self.back_btn, self.forward_btn, self.done_btn]:
+        # Set fixed height for buttons
+        for btn in [self.done_btn, self.next_btn]:
             btn.setFixedHeight(24)  # Compact height
             btn.setStyleSheet(
                 "padding: 0px 8px;"
             )  # Reduce vertical padding, keep horizontal
 
-        # Make buttons expand horizontally
-        nav_layout.addWidget(self.back_btn, 1)
-        nav_layout.addWidget(self.forward_btn, 1)
-        nav_layout.addWidget(self.done_btn, 1)
+        # Add widgets to layout
+        nav_layout.addWidget(self.browser_category_checkbox)
+        nav_layout.addStretch()  # Add space between checkbox and buttons
+        nav_layout.addWidget(self.next_btn)
+        nav_layout.addWidget(self.done_btn)
         right_layout.addWidget(self.nav_buttons)
         self.nav_buttons.hide()  # Hide navigation buttons initially
+
+        # Current category and post index for navigation
+        self.current_category = None
+        self.current_category_posts = []
+        self.current_post_index = -1
 
         # Replace browser with subreddit view
         self.subreddit_view = SubredditView(self)
@@ -330,10 +358,12 @@ class RedditExplorer(QMainWindow):
 
     def setup_connections(self):
         """Setup signal/slot connections"""
-        self.back_btn.clicked.connect(self.browser.back)
-        self.forward_btn.clicked.connect(self.browser.forward)
-        self.tree.itemDoubleClicked.connect(self.handle_tree_click)
+        self.next_btn.clicked.connect(self.handle_next_click)
         self.done_btn.clicked.connect(self.handle_done_click)
+        self.tree.itemClicked.connect(self.handle_tree_click)
+        self.browser_category_checkbox.stateChanged.connect(
+            self.handle_browser_category_changed
+        )
         # More connections will be added as we implement features
 
     def load_subreddits(self):
@@ -369,8 +399,8 @@ class RedditExplorer(QMainWindow):
             # Subreddit already exists
             pass
 
-    def handle_tree_click(self, item, column):
-        """Handle double-click events on tree items"""
+    def handle_tree_click(self, item):
+        """Handle single-click events on tree items"""
         parent = item.parent()
         if parent is None:
             return
@@ -459,6 +489,11 @@ class RedditExplorer(QMainWindow):
             self.subreddit_view.show()
             self.subreddit_view.clear()
 
+            # Store category name for navigation
+            self.current_category = category_name
+            self.current_category_posts = []
+            self.current_post_index = -1
+
             # Get posts for this category
             cursor = self.conn.cursor()
             # Enable dictionary access to rows
@@ -485,16 +520,18 @@ class RedditExplorer(QMainWindow):
 
                 # Create post_data dictionary similar to Reddit API response
                 post_data = {
-                    "id": row["reddit_id"],  # reddit_id
-                    "title": row["title"],  # title
-                    "url": row["url"],  # url
+                    "id": row["reddit_id"],
+                    "title": row["title"],
+                    "url": row["url"],
                     "subreddit": row["subreddit_name"],
-                    "created_utc": (
-                        added_date.timestamp() if added_date else 0
-                    ),  # added_date
-                    "num_comments": 0,  # We don't have this info for saved posts
-                    "selftext": "",  # Add empty selftext to avoid KeyError
+                    "created_utc": (added_date.timestamp() if added_date else 0),
+                    "num_comments": 0,
+                    "selftext": "",
                 }
+                # Store post data for navigation
+                self.current_category_posts.append(post_data)
+
+                # Add post to view
                 self.subreddit_view.add_post(
                     post_data,
                     is_saved=True,
@@ -656,6 +693,10 @@ class RedditExplorer(QMainWindow):
         # Clear browser URL to prevent memory usage
         self.browser.setUrl("")
 
+        # If we were viewing a category, reload it to reflect any checkbox changes
+        if self.current_category:
+            self.load_category_posts(self.current_category)
+
     def update_post_category_visibility(self, post_id, show_in_categories):
         """Update whether a post should be shown in categories view"""
         cursor = self.conn.cursor()
@@ -664,6 +705,47 @@ class RedditExplorer(QMainWindow):
             (1 if show_in_categories else 0, post_id),
         )
         self.conn.commit()
+
+    def handle_browser_category_changed(self, state):
+        """Handle category checkbox changes in browser view"""
+        if self.current_post_index >= 0 and self.current_post_index < len(
+            self.current_category_posts
+        ):
+            post_data = self.current_category_posts[self.current_post_index]
+            self.update_post_category_visibility(
+                post_data["id"], state == 2
+            )  # 2 is Qt.Checked
+
+    def handle_next_click(self):
+        """Handle Next button click - show next post in category"""
+        if (
+            not self.current_category_posts
+            or self.current_post_index >= len(self.current_category_posts) - 1
+        ):
+            self.next_btn.setEnabled(False)
+            return
+
+        self.current_post_index += 1
+        post_data = self.current_category_posts[self.current_post_index]
+
+        # Update Next button state
+        self.next_btn.setEnabled(
+            self.current_post_index < len(self.current_category_posts) - 1
+        )
+
+        # Update checkbox state
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT show_in_categories FROM saved_posts WHERE reddit_id = ?",
+            (post_data["id"],),
+        )
+        result = cursor.fetchone()
+        if result:
+            self.browser_category_checkbox.setChecked(bool(result[0]))
+
+        # Construct and load Reddit post URL
+        post_url = f"https://www.reddit.com/r/{post_data['subreddit']}/comments/{post_data['id']}"
+        self.browser.setUrl(post_url)
 
 
 if __name__ == "__main__":
