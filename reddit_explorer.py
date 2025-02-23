@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QLabel,
     QMenu,
+    QSizePolicy,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import Qt
@@ -32,6 +33,11 @@ class PostWidget(QFrame):
         self.main_window = main_window
         self.setFrameStyle(QFrame.Box | QFrame.Raised)
         self.setLineWidth(1)
+
+        # Enable mouse tracking for cursor changes
+        self.setMouseTracking(True)
+        # Make the widget clickable
+        self.setCursor(Qt.PointingHandCursor)
 
         layout = QVBoxLayout(self)
 
@@ -104,6 +110,25 @@ class PostWidget(QFrame):
         """Connect checkbox signal after initial state is set"""
         self.checkbox.stateChanged.connect(self.on_checkbox_changed)
 
+    def mouseDoubleClickEvent(self, event):
+        """Handle double-click events to open post in browser"""
+        # Construct Reddit post URL
+        post_url = f"https://www.reddit.com/r/{self.post_data['subreddit']}/comments/{self.post_data['id']}"
+
+        # Show browser and navigation buttons
+        self.main_window.browser.show()
+        self.main_window.nav_buttons.show()
+        self.main_window.subreddit_view.hide()
+        self.main_window.browser.setUrl(post_url)
+
+    def enterEvent(self, event):
+        """Handle mouse enter events"""
+        self.setStyleSheet("background-color: #f0f0f0;")
+
+    def leaveEvent(self, event):
+        """Handle mouse leave events"""
+        self.setStyleSheet("")
+
 
 class SubredditView(QScrollArea):
     """Widget to display subreddit posts"""
@@ -171,17 +196,35 @@ class RedditExplorer(QMainWindow):
         # Right panel (Browser)
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
 
         # Navigation buttons
-        nav_buttons = QWidget()
-        nav_layout = QHBoxLayout(nav_buttons)
+        self.nav_buttons = QWidget()
+        self.nav_buttons.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Fixed
+        )  # Make height fixed
+        nav_layout = QHBoxLayout(self.nav_buttons)
+        nav_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
+        nav_layout.setSpacing(4)  # Reduce spacing between buttons
+
+        # Create and style buttons
         self.back_btn = QPushButton("Back")
         self.forward_btn = QPushButton("Forward")
         self.done_btn = QPushButton("Done")
-        nav_layout.addWidget(self.back_btn)
-        nav_layout.addWidget(self.forward_btn)
-        nav_layout.addWidget(self.done_btn)
-        right_layout.addWidget(nav_buttons)
+
+        # Set fixed height for all buttons
+        for btn in [self.back_btn, self.forward_btn, self.done_btn]:
+            btn.setFixedHeight(24)  # Compact height
+            btn.setStyleSheet(
+                "padding: 0px 8px;"
+            )  # Reduce vertical padding, keep horizontal
+
+        # Make buttons expand horizontally
+        nav_layout.addWidget(self.back_btn, 1)
+        nav_layout.addWidget(self.forward_btn, 1)
+        nav_layout.addWidget(self.done_btn, 1)
+        right_layout.addWidget(self.nav_buttons)
+        self.nav_buttons.hide()  # Hide navigation buttons initially
 
         # Replace browser with subreddit view
         self.subreddit_view = SubredditView(self)
@@ -253,6 +296,7 @@ class RedditExplorer(QMainWindow):
         self.back_btn.clicked.connect(self.browser.back)
         self.forward_btn.clicked.connect(self.browser.forward)
         self.tree.itemDoubleClicked.connect(self.handle_tree_click)
+        self.done_btn.clicked.connect(self.handle_done_click)
         # More connections will be added as we implement features
 
     def load_subreddits(self):
@@ -304,8 +348,9 @@ class RedditExplorer(QMainWindow):
     def load_subreddit_posts(self, subreddit_name):
         """Fetch posts from a subreddit"""
         try:
-            # Clear and hide browser, show subreddit view
+            # Clear and hide browser and navigation buttons, show subreddit view
             self.browser.hide()
+            self.nav_buttons.hide()
             self.subreddit_view.show()
             self.subreddit_view.clear()
 
@@ -369,8 +414,9 @@ class RedditExplorer(QMainWindow):
     def load_category_posts(self, category_name):
         """Load and display posts from a specific category"""
         try:
-            # Clear and hide browser, show subreddit view
+            # Clear and hide browser and navigation buttons, show subreddit view
             self.browser.hide()
+            self.nav_buttons.hide()
             self.subreddit_view.show()
             self.subreddit_view.clear()
 
@@ -552,6 +598,19 @@ class RedditExplorer(QMainWindow):
             if root.child(i).text(0) == subreddit_name:
                 root.removeChild(root.child(i))
                 break
+
+    def handle_done_click(self):
+        """Handle Done button click - return to subreddit view if in browser mode"""
+        if not self.subreddit_view.isHidden():
+            return
+
+        # Switch back to subreddit view
+        self.browser.hide()
+        self.nav_buttons.hide()
+        self.subreddit_view.show()
+
+        # Clear browser URL to prevent memory usage
+        self.browser.setUrl("")
 
 
 if __name__ == "__main__":
