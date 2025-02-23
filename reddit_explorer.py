@@ -241,6 +241,11 @@ class RedditExplorer(QMainWindow):
             );
         """
         )
+
+        # Ensure Uncategorized category exists
+        cursor.execute(
+            "INSERT OR IGNORE INTO categories (name) VALUES ('Uncategorized')"
+        )
         self.conn.commit()
 
     def setup_connections(self):
@@ -251,17 +256,22 @@ class RedditExplorer(QMainWindow):
         # More connections will be added as we implement features
 
     def load_subreddits(self):
-        """Load subreddits from database into tree widget"""
+        """Load subreddits and categories from database into tree widget"""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT name FROM subreddits ORDER BY name")
 
         # Create main categories in tree
         self.subreddits_root = QTreeWidgetItem(self.tree, ["Subreddits"])
         self.categories_root = QTreeWidgetItem(self.tree, ["Categories"])
 
         # Load subreddits under subreddits root
+        cursor.execute("SELECT name FROM subreddits ORDER BY name")
         for row in cursor.fetchall():
             QTreeWidgetItem(self.subreddits_root, [row[0]])
+
+        # Load categories under categories root
+        cursor.execute("SELECT name FROM categories ORDER BY name")
+        for row in cursor.fetchall():
+            QTreeWidgetItem(self.categories_root, [row[0]])
 
         self.tree.expandAll()
 
@@ -288,8 +298,8 @@ class RedditExplorer(QMainWindow):
             subreddit_name = item.text(0)
             self.load_subreddit_posts(subreddit_name)
         elif parent.text(0) == "Categories":
-            # TODO: Load category posts
-            pass
+            category_name = item.text(0)
+            self.load_category_posts(category_name)
 
     def load_subreddit_posts(self, subreddit_name):
         """Fetch posts from a subreddit"""
@@ -356,6 +366,56 @@ class RedditExplorer(QMainWindow):
             print(f"Error fetching subreddit posts: {e}")
             # TODO: Add proper error handling/user notification
 
+    def load_category_posts(self, category_name):
+        """Load and display posts from a specific category"""
+        try:
+            # Clear and hide browser, show subreddit view
+            self.browser.hide()
+            self.subreddit_view.show()
+            self.subreddit_view.clear()
+
+            # Get posts for this category
+            cursor = self.conn.cursor()
+            # Enable dictionary access to rows
+            cursor.row_factory = sqlite3.Row
+
+            cursor.execute(
+                """
+                SELECT sp.*, s.name as subreddit_name
+                FROM saved_posts sp
+                JOIN subreddits s ON sp.subreddit_id = s.id
+                WHERE sp.category = ?
+                ORDER BY sp.added_date DESC
+                """,
+                (category_name,),
+            )
+
+            for row in cursor.fetchall():
+                # Parse the datetime string from SQLite
+                added_date = (
+                    datetime.strptime(row["added_date"], "%Y-%m-%d %H:%M:%S")
+                    if row["added_date"]
+                    else None
+                )
+
+                # Create post_data dictionary similar to Reddit API response
+                post_data = {
+                    "id": row["reddit_id"],  # reddit_id
+                    "title": row["title"],  # title
+                    "url": row["url"],  # url
+                    "subreddit": row["subreddit_name"],
+                    "created_utc": (
+                        added_date.timestamp() if added_date else 0
+                    ),  # added_date
+                    "num_comments": 0,  # We don't have this info for saved posts
+                    "selftext": "",  # Add empty selftext to avoid KeyError
+                }
+                self.subreddit_view.add_post(post_data, is_saved=True)
+
+        except sqlite3.Error as e:
+            print(f"Error loading category posts: {e}")
+            # TODO: Add proper error handling/user notification
+
     def save_post(self, post_data):
         """Save a post to the database"""
         cursor = self.conn.cursor()
@@ -391,8 +451,8 @@ class RedditExplorer(QMainWindow):
         try:
             cursor.execute(
                 """
-                INSERT INTO saved_posts (reddit_id, subreddit_id, title, url)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO saved_posts (reddit_id, subreddit_id, title, url, category)
+                VALUES (?, ?, ?, ?, 'Uncategorized')
             """,
                 (post_data["id"], subreddit_id, post_data["title"], post_data["url"]),
             )
