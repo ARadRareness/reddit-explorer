@@ -15,10 +15,12 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 import sqlite3
 import requests
 from datetime import datetime
 import json
+import os
 
 
 class PostWidget(QFrame):
@@ -43,6 +45,13 @@ class PostWidget(QFrame):
         header_layout.addWidget(self.title, 1)
         layout.addLayout(header_layout)
 
+        # Creation time
+        created_time = datetime.fromtimestamp(post_data["created_utc"])
+        time_str = created_time.strftime("%Y-%m-%d %H:%M:%S")
+        self.time_label = QLabel(f"Posted: {time_str}")
+        self.time_label.setStyleSheet("color: gray;")
+        layout.addWidget(self.time_label)
+
         # Description
         if post_data.get("selftext"):
             self.description = QLabel(
@@ -52,6 +61,19 @@ class PostWidget(QFrame):
             )
             self.description.setWordWrap(True)
             layout.addWidget(self.description)
+
+        # Image (if available)
+        if post_data.get("url"):
+            image_path = self.main_window.cache_image(post_data)
+            if image_path:
+                image_label = QLabel()
+                pixmap = QPixmap(image_path)
+                # Scale image to fit width while maintaining aspect ratio
+                scaled_pixmap = pixmap.scaledToWidth(
+                    800, Qt.TransformationMode.SmoothTransformation
+                )
+                image_label.setPixmap(scaled_pixmap)
+                layout.addWidget(image_label)
 
         # Footer (comments count)
         footer_layout = QHBoxLayout()
@@ -115,6 +137,12 @@ class RedditExplorer(QMainWindow):
         super().__init__()
         self.setWindowTitle("Reddit Explorer")
         self.setMinimumSize(1200, 800)
+
+        # Create image cache directory
+        self.cache_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "image_cache"
+        )
+        os.makedirs(self.cache_dir, exist_ok=True)
 
         # Main layout
         main_widget = QWidget()
@@ -193,6 +221,14 @@ class RedditExplorer(QMainWindow):
                 id INTEGER PRIMARY KEY,
                 name TEXT UNIQUE
             );
+            
+            CREATE TABLE IF NOT EXISTS cached_images (
+                id INTEGER PRIMARY KEY,
+                post_id TEXT UNIQUE,
+                image_path TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (post_id) REFERENCES saved_posts(reddit_id)
+            );
         """
         )
         self.conn.commit()
@@ -248,13 +284,6 @@ class RedditExplorer(QMainWindow):
     def load_subreddit_posts(self, subreddit_name):
         """Fetch posts from a subreddit"""
         try:
-            url = f"https://www.reddit.com/r/{subreddit_name}/new.json"
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-
-            data = response.json()
-            posts = data["data"]["children"]
-
             # Clear and hide browser, show subreddit view
             self.browser.hide()
             self.subreddit_view.show()
@@ -272,11 +301,46 @@ class RedditExplorer(QMainWindow):
             )
             saved_posts = {row[0] for row in cursor.fetchall()}
 
-            # Add posts to subreddit view
-            for post in posts:
-                post_data = post["data"]
-                is_saved = post_data["id"] in saved_posts
-                self.subreddit_view.add_post(post_data, is_saved)
+            # Initialize variables for pagination
+            after = None
+            total_posts = 0
+            found_saved = False
+            MAX_POSTS = 400
+
+            while total_posts < MAX_POSTS and not found_saved:
+                # Construct URL with pagination parameters
+                url = f"https://www.reddit.com/r/{subreddit_name}/new.json?limit=100"
+                if after:
+                    url += f"&after={after}"
+
+                # Fetch posts
+                response = requests.get(url, headers=self.headers)
+                response.raise_for_status()
+                data = response.json()
+
+                # Get posts from response
+                posts = data["data"]["children"]
+                if not posts:  # No more posts to load
+                    break
+
+                # Update after for next pagination
+                after = data["data"].get("after")
+                if not after:  # No more pages available
+                    break
+
+                # Add posts to view
+                for post in posts:
+                    post_data = post["data"]
+                    is_saved = post_data["id"] in saved_posts
+                    self.subreddit_view.add_post(post_data, is_saved)
+                    total_posts += 1
+
+                    if is_saved:  # Stop if we found a saved post
+                        found_saved = True
+                        break
+
+                    if total_posts >= MAX_POSTS:  # Stop if we hit the limit
+                        break
 
         except requests.RequestException as e:
             print(f"Error fetching subreddit posts: {e}")
@@ -321,6 +385,59 @@ class RedditExplorer(QMainWindow):
             "DELETE FROM saved_posts WHERE reddit_id = ?", (post_data["id"],)
         )
         self.conn.commit()
+
+    def get_cached_image(self, post_id):
+        """Get the path to a cached image for a post"""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT image_path FROM cached_images WHERE post_id = ?", (post_id,)
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+    def cache_image(self, post_data):
+        """Download and cache an image from a post"""
+        import hashlib
+
+        # Skip if no image URL or already cached
+        if not post_data.get("url") or not any(
+            post_data["url"].lower().endswith(ext)
+            for ext in [".jpg", ".jpeg", ".png", ".gif"]
+        ):
+            return None
+
+        # Check if already cached
+        cached_path = self.get_cached_image(post_data["id"])
+        if cached_path:
+            return cached_path
+
+        try:
+            # Download image
+            response = requests.get(post_data["url"], headers=self.headers)
+            response.raise_for_status()
+
+            # Generate filename from URL
+            ext = os.path.splitext(post_data["url"])[1]
+            filename = hashlib.md5(post_data["url"].encode()).hexdigest() + ext
+            filepath = os.path.join(self.cache_dir, filename)
+
+            # Save image
+            with open(filepath, "wb") as f:
+                f.write(response.content)
+
+            # Store in database
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "INSERT INTO cached_images (post_id, image_path) VALUES (?, ?)",
+                (post_data["id"], filepath),
+            )
+            self.conn.commit()
+
+            return filepath
+
+        except Exception as e:
+            print(f"Error caching image: {e}")
+            return None
 
 
 if __name__ == "__main__":
