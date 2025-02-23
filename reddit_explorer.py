@@ -28,9 +28,10 @@ import os
 class PostWidget(QFrame):
     """Widget to display a single post"""
 
-    def __init__(self, post_data, main_window, parent=None):
+    def __init__(self, post_data, main_window, view_type="subreddit", parent=None):
         super().__init__(parent)
         self.main_window = main_window
+        self.view_type = view_type  # "subreddit" or "category"
         self.setFrameStyle(QFrame.Box | QFrame.Raised)
         self.setLineWidth(1)
 
@@ -43,12 +44,31 @@ class PostWidget(QFrame):
 
         # Header layout (checkbox and title)
         header_layout = QHBoxLayout()
-        self.checkbox = QCheckBox()
+
+        # Checkbox container for better alignment
+        checkbox_container = QWidget()
+        checkbox_layout = QHBoxLayout(checkbox_container)
+        checkbox_layout.setContentsMargins(0, 0, 0, 0)
+        checkbox_layout.setSpacing(4)
+
+        # Create both checkboxes but only show the relevant one
+        self.added_checkbox = QCheckBox()
+        self.added_checkbox.setToolTip("Add post")
+        self.category_checkbox = QCheckBox()
+        self.category_checkbox.setToolTip("Show in categories")
+
+        if view_type == "subreddit":
+            checkbox_layout.addWidget(self.added_checkbox)
+            self.category_checkbox.hide()
+        else:  # category view
+            checkbox_layout.addWidget(self.category_checkbox)
+            self.added_checkbox.hide()
+
         self.title = QLabel(post_data["title"])
         self.title.setWordWrap(True)
         self.title.setStyleSheet("font-weight: bold;")
 
-        header_layout.addWidget(self.checkbox)
+        header_layout.addWidget(checkbox_container)
         header_layout.addWidget(self.title, 1)
         layout.addLayout(header_layout)
 
@@ -92,13 +112,14 @@ class PostWidget(QFrame):
         # Store post data
         self.post_data = post_data
 
-        # Store initial saved state and set checkbox state BEFORE connecting signal
+        # Store initial states and set checkbox states BEFORE connecting signals
         self.is_saved = False  # Will be set by parent widget
-        # Connect signal AFTER setting initial state in parent widget
-        # The parent widget will call setup_checkbox_connection() after setting states
+        self.show_in_categories = True  # Will be set by parent widget
+        # Connect signals AFTER setting initial states in parent widget
+        # The parent widget will call setup_checkbox_connections() after setting states
 
-    def on_checkbox_changed(self, state):
-        """Handle checkbox state changes"""
+    def on_added_checkbox_changed(self, state):
+        """Handle added checkbox state changes"""
         if state == 2:  # Qt.Checked
             print("Saving post")
             self.main_window.save_post(self.post_data)
@@ -106,9 +127,17 @@ class PostWidget(QFrame):
             print("Unsaving post")
             self.main_window.unsave_post(self.post_data)
 
-    def setup_checkbox_connection(self):
-        """Connect checkbox signal after initial state is set"""
-        self.checkbox.stateChanged.connect(self.on_checkbox_changed)
+    def on_category_checkbox_changed(self, state):
+        """Handle category checkbox state changes"""
+        if self.is_saved:  # Only update if post is saved
+            self.main_window.update_post_category_visibility(
+                self.post_data["id"], state == 2
+            )
+
+    def setup_checkbox_connections(self):
+        """Connect checkbox signals after initial states are set"""
+        self.added_checkbox.stateChanged.connect(self.on_added_checkbox_changed)
+        self.category_checkbox.stateChanged.connect(self.on_category_checkbox_changed)
 
     def mouseDoubleClickEvent(self, event):
         """Handle double-click events to open post in browser"""
@@ -149,12 +178,19 @@ class SubredditView(QScrollArea):
             if child.widget():
                 child.widget().deleteLater()
 
-    def add_post(self, post_data, is_saved=False):
+    def add_post(
+        self, post_data, is_saved=False, show_in_categories=True, view_type="subreddit"
+    ):
         """Add a post widget"""
-        post_widget = PostWidget(post_data, self.main_window)
+        post_widget = PostWidget(post_data, self.main_window, view_type)
         post_widget.is_saved = is_saved
-        post_widget.checkbox.setChecked(is_saved)
-        post_widget.setup_checkbox_connection()  # Connect signal after setting states
+        post_widget.show_in_categories = show_in_categories
+        post_widget.added_checkbox.setChecked(is_saved)
+        post_widget.category_checkbox.setChecked(show_in_categories)
+        post_widget.category_checkbox.setEnabled(
+            is_saved
+        )  # Only enable if post is saved
+        post_widget.setup_checkbox_connections()  # Connect signals after setting states
         self.layout.addWidget(post_widget)
 
         # Scroll to bottom after adding the post
@@ -266,6 +302,7 @@ class RedditExplorer(QMainWindow):
                 url TEXT,
                 category TEXT,
                 is_read BOOLEAN DEFAULT 0,
+                show_in_categories BOOLEAN DEFAULT 1,
                 added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (subreddit_id) REFERENCES subreddits(id)
             );
@@ -397,7 +434,9 @@ class RedditExplorer(QMainWindow):
                 for post in posts:
                     post_data = post["data"]
                     is_saved = post_data["id"] in saved_posts
-                    self.subreddit_view.add_post(post_data, is_saved)
+                    self.subreddit_view.add_post(
+                        post_data, is_saved, view_type="subreddit"
+                    )
                     total_posts += 1
 
                     if is_saved:  # Stop if we found a saved post
@@ -430,7 +469,7 @@ class RedditExplorer(QMainWindow):
                 SELECT sp.*, s.name as subreddit_name
                 FROM saved_posts sp
                 JOIN subreddits s ON sp.subreddit_id = s.id
-                WHERE sp.category = ?
+                WHERE sp.category = ? AND sp.show_in_categories = 1
                 ORDER BY sp.added_date DESC
                 """,
                 (category_name,),
@@ -456,7 +495,12 @@ class RedditExplorer(QMainWindow):
                     "num_comments": 0,  # We don't have this info for saved posts
                     "selftext": "",  # Add empty selftext to avoid KeyError
                 }
-                self.subreddit_view.add_post(post_data, is_saved=True)
+                self.subreddit_view.add_post(
+                    post_data,
+                    is_saved=True,
+                    show_in_categories=True,
+                    view_type="category",
+                )
 
         except sqlite3.Error as e:
             print(f"Error loading category posts: {e}")
@@ -497,8 +541,8 @@ class RedditExplorer(QMainWindow):
         try:
             cursor.execute(
                 """
-                INSERT INTO saved_posts (reddit_id, subreddit_id, title, url, category)
-                VALUES (?, ?, ?, ?, 'Uncategorized')
+                INSERT INTO saved_posts (reddit_id, subreddit_id, title, url, category, show_in_categories)
+                VALUES (?, ?, ?, ?, 'Uncategorized', 1)
             """,
                 (post_data["id"], subreddit_id, post_data["title"], post_data["url"]),
             )
@@ -611,6 +655,15 @@ class RedditExplorer(QMainWindow):
 
         # Clear browser URL to prevent memory usage
         self.browser.setUrl("")
+
+    def update_post_category_visibility(self, post_id, show_in_categories):
+        """Update whether a post should be shown in categories view"""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE saved_posts SET show_in_categories = ? WHERE reddit_id = ?",
+            (1 if show_in_categories else 0, post_id),
+        )
+        self.conn.commit()
 
 
 if __name__ == "__main__":
