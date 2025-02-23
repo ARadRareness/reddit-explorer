@@ -328,6 +328,14 @@ class RedditExplorer(QMainWindow):
                     backButton.remove();
                     console.log('Back button removed');
                 }
+
+                // Remove overflow menu
+                const overflowMenu = document.querySelector('shreddit-post-overflow-menu');
+                if (overflowMenu) {
+                    console.log('Found overflow menu:', overflowMenu.className);
+                    overflowMenu.remove();
+                    console.log('Overflow menu removed');
+                }
                 
                 // Try to find the left nav container using both tag name and ID
                 const leftNavContainer = document.querySelector('flex-left-nav-container#left-sidebar-container') || 
