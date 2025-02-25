@@ -2,7 +2,7 @@
 Service for AI-powered post categorization.
 """
 
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Set
 from reddit_explorer.services.openai_service import OpenAIService
 from reddit_explorer.data.models import RedditPost
 
@@ -155,6 +155,7 @@ Summary: {summary}
     ) -> List[Tuple[str, str]]:
         """
         Generate bullet points from multiple post summaries, focusing on posts with meaningful learnable information.
+        Processes summaries in batches of 30 to avoid overwhelming the AI model.
 
         Args:
             summaries: List of tuples containing (summary, post_id)
@@ -162,6 +163,44 @@ Summary: {summary}
         Returns:
             List of tuples containing (bullet_point, post_id), where each bullet point represents
             a meaningful insight or learnable information from the selected posts.
+        """
+        # Process in batches of 30
+        BATCH_SIZE = 30
+        all_bullet_points: List[Tuple[str, str]] = []
+
+        # Process each batch
+        for batch_start in range(0, len(summaries), BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, len(summaries))
+            batch = summaries[batch_start:batch_end]
+
+            # Adjust indices to be relative to the current batch
+            batch_points = self._process_bullet_point_batch(batch, batch_start)
+            all_bullet_points.extend(batch_points)
+
+        # Select the most valuable points if we have more than needed
+        if all_bullet_points and len(all_bullet_points) > 15:
+            all_bullet_points = self._select_most_valuable_points(all_bullet_points)
+
+        # If no valid bullet points were found, return a message indicating no learnable content
+        if not all_bullet_points:
+            return [
+                ("No significant technical insights found in the recent posts.", "")
+            ]
+
+        return all_bullet_points
+
+    def _process_bullet_point_batch(
+        self, summaries_batch: List[Tuple[str, str]], batch_start_index: int = 0
+    ) -> List[Tuple[str, str]]:
+        """
+        Process a batch of summaries to generate bullet points.
+
+        Args:
+            summaries_batch: A batch of summaries to process
+            batch_start_index: The starting index of this batch in the original list
+
+        Returns:
+            List of bullet points with their corresponding post_ids
         """
         system_message = """You are an expert technical content curator. Your task is to analyze Reddit post summaries and extract ONLY the most technically valuable and actionable insights.
 
@@ -172,8 +211,8 @@ You MUST format each insight using XML tags exactly like this:
 Where N is the index number (0-based) of the post that contains this insight.
 
 Example outputs:
-<point>Claude 3.7 Sonnet achieves 60% accuracy on the Aider polyglot benchmark, matching o3-mini-high's performance in technical coding tasks</point><id>9</id>
-<point>New open-source PSE library improves structured output handling in LLMs, offering better performance than existing solutions for local models</point><id>0</id>
+<point>...</point><id>9</id>
+<point>...</point><id>0</id>
 
 Content Selection Rules:
 1. ONLY select posts containing:
@@ -198,7 +237,7 @@ Output Rules:
 
 DO NOT summarize or group points together. Each point should be a distinct, specific technical insight from a single post."""
 
-        # Build the prompt with all summaries
+        # Build the prompt with all summaries in the batch
         prompt = """Extract ONLY the most technically significant and actionable insights from these summaries. Focus on concrete technical details, metrics, and innovations.
 
 REQUIRED FORMAT FOR EACH INSIGHT:
@@ -209,7 +248,7 @@ Where N is the index (0-based) of the source post.
 Summaries to analyze:
 
 """
-        for i, (summary, _) in enumerate(summaries):
+        for i, (summary, _) in enumerate(summaries_batch):
             prompt += f"[{i}] {summary}\n"
 
         prompt += "\nRemember: Only extract specific technical insights, using the exact <point>...</point><id>N</id> format for each one."
@@ -230,10 +269,6 @@ Summaries to analyze:
         import re
 
         # Find all bullet points with their post IDs using a more flexible regex pattern
-        # This pattern allows for:
-        # - Optional whitespace between tags and content
-        # - Newlines within the content
-        # - Both Unix and Windows line endings
         matches = re.finditer(
             r"<point>\s*(.*?)\s*</point>\s*<id>\s*(\d+)\s*</id>",
             response,
@@ -241,29 +276,109 @@ Summaries to analyze:
         )
 
         for match in matches:
-            # Clean up the point text by:
-            # - Removing extra whitespace
-            # - Normalizing newlines
-            # - Removing any leading/trailing quotes
+            # Clean up the point text
             point_text = match.group(1).strip()
             point_text = re.sub(r"\s+", " ", point_text)  # Normalize whitespace
             point_text = point_text.strip("\"'")  # Remove quotes if present
 
-            post_index = int(match.group(2))
+            # Get the batch-relative index
+            batch_relative_index = int(match.group(2))
 
             # Only add if the index is valid
-            if 0 <= post_index < len(summaries):
+            if 0 <= batch_relative_index < len(summaries_batch):
                 # Get the original post_id for this summary
-                _, post_id = summaries[post_index]
+                _, post_id = summaries_batch[batch_relative_index]
                 bullet_points.append((point_text, post_id))
 
-        # If no valid bullet points were found, return a message indicating no learnable content
-        if not bullet_points:
-            return [
-                ("No significant technical insights found in the recent posts.", "")
-            ]
-
         return bullet_points
+
+    def _select_most_valuable_points(
+        self, bullet_points: List[Tuple[str, str]], max_points: int = 15
+    ) -> List[Tuple[str, str]]:
+        """
+        Use AI to select the most valuable points from the collected bullet points.
+
+        Args:
+            bullet_points: List of tuples containing (bullet_point, post_id)
+            max_points: Maximum number of points to select (default: 15)
+
+        Returns:
+            List of the most valuable bullet points
+        """
+        if len(bullet_points) <= max_points:
+            return bullet_points
+
+        system_message = """You are an expert at evaluating and ranking technical content.
+Your task is to analyze a list of technical bullet points and select the most valuable ones based on their technical merit.
+
+REQUIRED OUTPUT FORMAT:
+For each selected point, output its index (0-based) between <selected></selected> tags.
+Example: <selected>2</selected> means you've selected the point at index 2.
+
+Rules for selecting the most valuable points:
+1. Prioritize points containing:
+   - Concrete technical innovations or breakthroughs
+   - Specific performance metrics or benchmarks
+   - Novel technical approaches or methodologies
+   - Actionable technical findings with practical applications
+   - Emerging technologies or tools with significant potential impact
+
+2. Consider these factors when ranking:
+   - Technical depth and specificity
+   - Novelty and innovation
+   - Practical applicability
+   - Clarity and information density
+   - Topic diversity (when choosing between points of similar quality, prefer those that cover different domains)
+
+3. Aim for a balanced selection:
+   - When multiple high-quality points cover similar topics, select the best one and use remaining slots for different topics
+   - Try to include insights from different domains
+   - All else being equal, a diverse set of topics is more valuable than redundant coverage
+
+4. Select EXACTLY {max_points} points (no more, no less)
+5. Do not explain your reasoning, just output the tags"""
+
+        # Build the prompt with all bullet points
+        prompt = f"""Select the {max_points} most valuable technical insights from this list, favoring diversity when points are of similar quality:
+
+"""
+        for i, (point, _) in enumerate(bullet_points):
+            prompt += f"[{i}] {point}\n"
+
+        prompt += f"\nOutput the indices of the {max_points} most valuable points using <selected>INDEX</selected> tags."
+
+        # Get selection analysis
+        response = self.openai.get_completion(
+            system_message=system_message,
+            prompt=prompt,
+            temperature=0.1,
+        )
+
+        # Extract selected indices
+        import re
+
+        selected_indices: Set[int] = set()
+        matches = re.finditer(r"<selected>\s*(\d+)\s*</selected>", response)
+
+        for match in matches:
+            index = int(match.group(1))
+            if 0 <= index < len(bullet_points):
+                selected_indices.add(index)
+
+        # If we didn't get enough selections, take the first max_points
+        if len(selected_indices) < max_points:
+            selected_indices = set(range(min(max_points, len(bullet_points))))
+
+        # If we got too many selections, take only the first max_points
+        if len(selected_indices) > max_points:
+            selected_indices = set(sorted(list(selected_indices))[:max_points])
+
+        # Create a new list with only the selected points
+        selected_points = [
+            point for i, point in enumerate(bullet_points) if i in selected_indices
+        ]
+
+        return selected_points
 
 
 def add_suggestion(category: str):

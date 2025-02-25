@@ -29,6 +29,7 @@ class SummarizeView(QScrollArea):
         """
         super().__init__(parent)
         self.main_window = main_window
+        self.current_time_period = "Last 24 hours"  # Default time period
 
         # Create container widget
         self.container = QWidget()
@@ -37,9 +38,9 @@ class SummarizeView(QScrollArea):
         self.setWidgetResizable(True)
 
         # Create Generate button
-        self.generate_btn = QPushButton("Generate")
+        self.generate_btn = QPushButton("Regenerate")
         self.generate_btn.setFixedHeight(32)
-        self.generate_btn.clicked.connect(self.main_window.generate_summaries)
+        self.generate_btn.clicked.connect(self._regenerate_summaries)
         self._layout.addWidget(self.generate_btn)
 
         # Create content area
@@ -49,6 +50,15 @@ class SummarizeView(QScrollArea):
 
         # Initialize empty cache for summaries
         self.summary_cache: Dict[str, List[Tuple[str, str]]] = {}
+
+    def _regenerate_summaries(self):
+        """Regenerate summaries for the current time period."""
+        # Clear the cache for the current time period to force regeneration
+        if self.current_time_period in self.summary_cache:
+            del self.summary_cache[self.current_time_period]
+
+        # Call the main window's generate_summaries method with the current time period
+        self.main_window.generate_summaries(self.current_time_period)
 
     def clear(self):
         """Clear all content."""
@@ -65,6 +75,9 @@ class SummarizeView(QScrollArea):
             time_period: The time period being summarized (e.g. "Last 24 hours")
             summaries: List of tuples containing (bullet_point, post_id)
         """
+        # Store the current time period
+        self.current_time_period = time_period
+
         # Cache the summaries
         self.summary_cache[time_period] = summaries
 
@@ -95,7 +108,7 @@ class SummarizeView(QScrollArea):
             if post_id:
                 bullet_widget.setCursor(Qt.CursorShape.PointingHandCursor)
                 bullet_widget.mousePressEvent = (
-                    lambda _, pid=post_id: self.main_window.open_post(pid)
+                    lambda ev, pid=post_id: self.main_window.open_post(pid)
                 )
 
             self.content_layout.addWidget(bullet_widget)
