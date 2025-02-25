@@ -3,7 +3,7 @@ Main window for the Reddit Explorer application.
 """
 
 from typing import List, Optional, Dict, Any, cast, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 import sqlite3
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -29,6 +29,7 @@ from reddit_explorer.services.image_service import ImageService
 from reddit_explorer.services.ai_service import AIService
 from reddit_explorer.ui.browser.browser_view import BrowserView
 from reddit_explorer.ui.widgets.subreddit_view import SubredditView
+from reddit_explorer.ui.widgets.summarize_view import SummarizeView
 from reddit_explorer.ui.main_window_interface import MainWindowInterface
 
 # Type alias for row factory function
@@ -57,6 +58,9 @@ class RedditExplorer(QMainWindow):
         self.current_category: Optional[str] = None
         self.current_category_posts: List[RedditPost] = []
         self.current_post_index: int = -1
+        self._current_view: str = (
+            "subreddit"  # Track current view: "subreddit", "category", or "summary"
+        )
 
     def _init_ui(self):
         """Initialize the UI components."""
@@ -124,12 +128,19 @@ class RedditExplorer(QMainWindow):
         right_layout.addWidget(self.nav_buttons)
         self.nav_buttons.hide()
 
-        # Create browser and subreddit view
+        # Create views
         self.subreddit_view = SubredditView(self)
         self.browser = BrowserView(debug=False)
+        self.summarize_view = SummarizeView(self)
+
+        # Add views to layout
         right_layout.addWidget(self.subreddit_view)
         right_layout.addWidget(self.browser)
+        right_layout.addWidget(self.summarize_view)
+
+        # Hide views initially
         self.browser.hide()
+        self.summarize_view.hide()
 
         # Add panels to main layout
         layout.addWidget(left_panel, 0)
@@ -146,6 +157,7 @@ class RedditExplorer(QMainWindow):
         # Create main categories in tree
         self.subreddits_root = QTreeWidgetItem(self.tree, ["Subreddits"])
         self.categories_root = QTreeWidgetItem(self.tree, ["Categories"])
+        self.summarize_root = QTreeWidgetItem(self.tree, ["Summarize"])
 
         # Load subreddits under subreddits root
         cursor.execute("SELECT name FROM subreddits ORDER BY name")
@@ -167,6 +179,9 @@ class RedditExplorer(QMainWindow):
             post_count = row[1]
             display_text = f"{category_name} ({post_count})"
             QTreeWidgetItem(self.categories_root, [display_text])
+
+        # Add summarize items
+        QTreeWidgetItem(self.summarize_root, ["Last 24 hours"])
 
         self.tree.expandAll()
 
@@ -353,14 +368,19 @@ class RedditExplorer(QMainWindow):
             # Extract category name without post count
             category_name = item.text(0).split(" (")[0]
             self.load_category_posts(category_name)
+        elif parent.text(0) == "Summarize":
+            time_period = item.text(0)
+            self._load_summarize_view(time_period)
 
     def _load_subreddit_posts(self, subreddit_name: str):
         """Load and display posts from a subreddit."""
         # Clear and hide browser and navigation buttons, show subreddit view
         self.browser.hide()
         self.nav_buttons.hide()
+        self.summarize_view.hide()  # Hide summary view
         self.subreddit_view.show()
         self.subreddit_view.clear()
+        self._current_view = "subreddit"  # Set current view to subreddit
 
         # Reset window title
         self.setWindowTitle("Reddit Explorer")
@@ -415,8 +435,10 @@ class RedditExplorer(QMainWindow):
         # Clear and hide browser and navigation buttons, show subreddit view
         self.browser.hide()
         self.nav_buttons.hide()
+        self.summarize_view.hide()  # Hide summary view
         self.subreddit_view.show()
         self.subreddit_view.clear()
+        self._current_view = "category"  # Set current view to category
 
         # Store category name for navigation
         self.current_category = category_name
@@ -510,7 +532,7 @@ class RedditExplorer(QMainWindow):
         self.browser.load_url(post_url, lambda ok: self.browser.hide_sidebar())
 
     def _handle_done_click(self):
-        """Handle Done button click - return to subreddit view."""
+        """Handle Done button click - return to previous view."""
         if not self.subreddit_view.isHidden():
             return
 
@@ -529,10 +551,15 @@ class RedditExplorer(QMainWindow):
             if result:
                 show_in_categories = bool(result[0])
 
-        # Switch back to subreddit view
+        # Hide browser and navigation buttons
         self.browser.hide()
         self.nav_buttons.hide()
-        self.subreddit_view.show()
+
+        # Show the appropriate view based on where we came from
+        if self._current_view == "summary":
+            self.summarize_view.show()
+        else:  # "subreddit" or "category"
+            self.subreddit_view.show()
 
         # Reset window title
         self.setWindowTitle("Reddit Explorer")
@@ -541,7 +568,7 @@ class RedditExplorer(QMainWindow):
         self.browser.setUrl("")
 
         # If we were viewing a category, reload it to reflect any checkbox changes
-        if self.current_category:
+        if self.current_category and self._current_view == "category":
             self.load_category_posts(self.current_category)
 
             # Restore checkbox state if we have it
@@ -550,20 +577,26 @@ class RedditExplorer(QMainWindow):
 
     def _handle_browser_category_changed(self, state: int):
         """Handle category checkbox changes in browser view."""
-        # Always update the database regardless of whether the post is in current_category_posts
-        post = (
-            self.current_category_posts[self.current_post_index]
-            if self.current_category_posts
-            else None
-        )
-        if post is None:
-            return
+        # Get the current post ID based on the view we came from
+        post_id = None
+        if self._current_view == "category" and self.current_category_posts:
+            # If we're in category view, get the post from current_category_posts
+            post = self.current_category_posts[self.current_post_index]
+            post_id = post.id
+        else:
+            # For summary view or other views, get the post ID from the URL
+            url = self.browser.url().toString()
+            import re
 
-        show_in_categories = state == 2
-        self.update_post_category_visibility(post.id, show_in_categories)
+            match = re.search(r"/comments/([^/]+)/", url)
+            if match:
+                post_id = match.group(1)
 
-        # Refresh category counts after visibility change
-        self.refresh_category_counts()
+        if post_id:
+            show_in_categories = state == 2
+            self.update_post_category_visibility(post_id, show_in_categories)
+            # Refresh category counts after visibility change
+            self.refresh_category_counts()
 
     def save_post(self, post: RedditPost) -> None:
         """Save a post to the database."""
@@ -1140,6 +1173,7 @@ class RedditExplorer(QMainWindow):
         # Clear and hide browser and navigation buttons, show subreddit view
         self.browser.hide()
         self.nav_buttons.hide()
+        self.summarize_view.hide()  # Hide summary view
         self.subreddit_view.show()
         self.subreddit_view.clear()
 
@@ -1181,3 +1215,175 @@ class RedditExplorer(QMainWindow):
 
         # Scroll to top
         self.subreddit_view.verticalScrollBar().setValue(0)
+
+    def _load_summarize_view(self, time_period: str):
+        """Load and display the summarize view for a time period."""
+        # Hide other views
+        self.browser.hide()
+        self.nav_buttons.hide()
+        self.subreddit_view.hide()
+        self.summarize_view.show()
+        self._current_view = "summary"  # Set current view to summary
+
+        # Check if we have cached summaries
+        cached_summaries = self.summarize_view.get_cached_summaries(time_period)
+        if cached_summaries is not None:
+            self.summarize_view.display_summaries(time_period, cached_summaries)
+            return
+
+        # Show generating content dialog
+        progress = QProgressDialog(
+            "Generating content...", None, 0, 0, self  # No cancel button
+        )
+        progress.setWindowTitle("Generating Content")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.show()
+
+        # Generate summaries
+        self.generate_summaries(time_period)
+
+        # Close progress dialog
+        progress.close()
+
+    def generate_summaries(self, time_period: str = "Last 24 hours"):
+        """Generate summaries for posts in a time period."""
+        cursor = self.db.get_cursor()
+
+        # Calculate the cutoff time based on the time period
+        if time_period == "Last 24 hours":
+            cutoff_time = datetime.now() - timedelta(days=1)
+        else:
+            # Add more time periods here as needed
+            return
+
+        # Get posts from the time period
+        cursor.execute(
+            """
+            SELECT sp.reddit_id, sp.title, sp.url, sp.content, sp.num_comments, sp.added_date, sp.summary,
+                   s.name as subreddit_name
+            FROM saved_posts sp
+            JOIN subreddits s ON sp.subreddit_id = s.id
+            WHERE sp.added_date >= ?
+            ORDER BY sp.added_date DESC
+            """,
+            (cutoff_time.strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+        rows = cursor.fetchall()
+
+        # Create list of posts that need summaries
+        posts_to_summarize = []
+        for row in rows:
+            # Unpack the row tuple into named variables for clarity
+            (
+                reddit_id,
+                title,
+                url,
+                content,
+                num_comments,
+                added_date,
+                summary,
+                subreddit_name,
+            ) = row
+
+            post = RedditPost(
+                id=reddit_id,
+                title=title,
+                url=url,
+                subreddit=subreddit_name,
+                created_utc=datetime.strptime(
+                    added_date, "%Y-%m-%d %H:%M:%S"
+                ).timestamp(),
+                num_comments=num_comments,
+                selftext=content or "",
+            )
+            if not summary:
+                posts_to_summarize.append(post)
+
+        # Generate missing summaries
+        if posts_to_summarize:
+            progress = QProgressDialog(
+                "Generating summaries...",
+                "Cancel",
+                0,
+                len(posts_to_summarize),
+                self,
+            )
+            progress.setWindowTitle("Generating Summaries")
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.show()
+
+            for i, post in enumerate(posts_to_summarize):
+                progress.setValue(i)
+                progress.setLabelText(
+                    f"Generating summary {i + 1} of {len(posts_to_summarize)}..."
+                )
+
+                # Generate summary using AI service
+                summary = self.ai_service.summarize_post(post)
+
+                # Save summary to database
+                cursor.execute(
+                    "UPDATE saved_posts SET summary = ? WHERE reddit_id = ?",
+                    (summary, post.id),
+                )
+                self.db.commit()
+
+            progress.close()
+
+        # Get all posts with summaries
+        cursor.execute(
+            """
+            SELECT sp.reddit_id, sp.summary
+            FROM saved_posts sp
+            JOIN subreddits s ON sp.subreddit_id = s.id
+            WHERE sp.added_date >= ? AND sp.summary IS NOT NULL
+            ORDER BY sp.added_date DESC
+            """,
+            (cutoff_time.strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+        rows = cursor.fetchall()
+
+        if not rows:
+            self.summarize_view.display_summaries(
+                time_period, [("No posts found in this time period.", "")]
+            )
+            return
+
+        # Generate bullet points from summaries using AI
+        summaries = [(row[1], row[0]) for row in rows]  # (summary, post_id)
+        bullet_points = self.ai_service.generate_bullet_points(summaries)
+
+        # Display the bullet points
+        self.summarize_view.display_summaries(time_period, bullet_points)
+
+    def open_post(self, post_id: str):
+        """Open a post in the browser view."""
+        cursor = self.db.get_cursor()
+        cursor.execute(
+            """
+            SELECT s.name as subreddit_name, sp.show_in_categories
+            FROM saved_posts sp
+            JOIN subreddits s ON sp.subreddit_id = s.id
+            WHERE sp.reddit_id = ?
+            """,
+            (post_id,),
+        )
+        result = cursor.fetchone()
+        if result:
+            # Get subreddit name and show_in_categories from the tuple
+            subreddit_name, show_in_categories = result
+
+            # Construct and load Reddit post URL
+            post_url = f"https://www.reddit.com/r/{subreddit_name}/comments/{post_id}"
+
+            # Show browser and navigation buttons
+            self.browser.show()
+            self.nav_buttons.show()
+            self.subreddit_view.hide()
+            self.summarize_view.hide()
+
+            # Set the checkbox state based on the database value
+            self.browser_category_checkbox.setChecked(bool(show_in_categories))
+
+            # Load the URL
+            self.browser.load_url(post_url, lambda ok: self.browser.hide_sidebar())
