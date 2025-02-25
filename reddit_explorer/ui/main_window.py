@@ -538,10 +538,12 @@ class RedditExplorer(QMainWindow):
 
         # Get current checkbox state before switching views
         show_in_categories = None
+        current_post_id = None
         if self.current_post_index >= 0 and self.current_post_index < len(
             self.current_category_posts
         ):
             post = self.current_category_posts[self.current_post_index]
+            current_post_id = post.id
             cursor = self.db.get_cursor()
             cursor.execute(
                 "SELECT show_in_categories FROM saved_posts WHERE reddit_id = ?",
@@ -550,6 +552,11 @@ class RedditExplorer(QMainWindow):
             result = cursor.fetchone()
             if result:
                 show_in_categories = bool(result[0])
+
+        # Store scroll position before switching views
+        scroll_position = 0
+        if self._current_view == "category":
+            scroll_position = self.subreddit_view.verticalScrollBar().value()
 
         # Hide browser and navigation buttons
         self.browser.hide()
@@ -567,9 +574,14 @@ class RedditExplorer(QMainWindow):
         # Clear browser URL to prevent memory usage
         self.browser.setUrl("")
 
-        # If we were viewing a category, reload it to reflect any checkbox changes
+        # If we were viewing a category, update only the changed post instead of reloading everything
         if self.current_category and self._current_view == "category":
-            self.load_category_posts(self.current_category)
+            if current_post_id and show_in_categories is not None:
+                # Update only the changed post
+                self._update_category_post(current_post_id, show_in_categories)
+
+            # Restore scroll position
+            self.subreddit_view.verticalScrollBar().setValue(scroll_position)
 
             # Restore checkbox state if we have it
             if show_in_categories is not None:
@@ -671,15 +683,20 @@ class RedditExplorer(QMainWindow):
         self, post_id: str, show_in_categories: bool
     ) -> None:
         """Update whether a post should be shown in categories view."""
-        cursor = self.db.get_cursor()
-        cursor.execute(
-            "UPDATE saved_posts SET show_in_categories = ? WHERE reddit_id = ?",
-            (1 if show_in_categories else 0, post_id),
-        )
-        self.db.commit()
+        # If we're in category view, use the optimized update method
+        if self._current_view == "category" and self.current_category:
+            self._update_category_post(post_id, show_in_categories)
+        else:
+            # Otherwise, just update the database
+            cursor = self.db.get_cursor()
+            cursor.execute(
+                "UPDATE saved_posts SET show_in_categories = ? WHERE reddit_id = ?",
+                (1 if show_in_categories else 0, post_id),
+            )
+            self.db.commit()
 
-        # Refresh category counts after visibility change
-        self.refresh_category_counts()
+            # Refresh category counts after visibility change
+            self.refresh_category_counts()
 
     def add_subreddit(self, subreddit_name: str) -> None:
         """Add a new subreddit to database and tree."""
@@ -1387,3 +1404,92 @@ class RedditExplorer(QMainWindow):
 
             # Load the URL
             self.browser.load_url(post_url, lambda ok: self.browser.hide_sidebar())
+
+    def _update_category_post(self, post_id: str, show_in_categories: bool):
+        """
+        Update a single post in the category view without reloading all posts.
+
+        This method updates the visibility of a post in the category view without
+        reloading all posts, which would reset the scroll position.
+
+        Args:
+            post_id: ID of the post to update
+            show_in_categories: Whether to show the post in categories view
+        """
+        # Update the database
+        cursor = self.db.get_cursor()
+        cursor.execute(
+            "UPDATE saved_posts SET show_in_categories = ? WHERE reddit_id = ?",
+            (1 if show_in_categories else 0, post_id),
+        )
+        self.db.commit()
+
+        # Check if the post is in the current category posts list
+        post_in_list = False
+        for i, post in enumerate(self.current_category_posts):
+            if post.id == post_id:
+                post_in_list = True
+                # If show_in_categories is False, remove the post from the list and view
+                if not show_in_categories:
+                    # Find and remove the post widget from the view
+                    for j in range(self.subreddit_view._layout.count()):
+                        widget = self.subreddit_view._layout.itemAt(j).widget()
+                        if (
+                            hasattr(widget, "post_data")
+                            and widget.post_data.id == post_id
+                        ):
+                            widget.deleteLater()
+                            self.subreddit_view._layout.removeWidget(widget)
+                            break
+
+                    # Remove the post from the list
+                    self.current_category_posts.pop(i)
+
+                    # Update current_post_index if needed
+                    if i <= self.current_post_index:
+                        self.current_post_index = max(0, self.current_post_index - 1)
+                break
+
+        # If the post is not in the list but should be shown in categories,
+        # we need to add it (this happens when changing from not showing to showing)
+        if not post_in_list and show_in_categories and self.current_category:
+            # Get post data from database
+            cursor.row_factory = None  # Reset row factory to default
+            cursor.execute(
+                """
+                SELECT sp.*, s.name as subreddit_name
+                FROM saved_posts sp
+                JOIN subreddits s ON sp.subreddit_id = s.id
+                WHERE sp.reddit_id = ?
+                """,
+                (post_id,),
+            )
+            row = cursor.fetchone()
+
+            if row:
+                # Create post data from database row
+                post = RedditPost(
+                    id=row[1],  # reddit_id
+                    title=row[3],  # title
+                    url=row[4],  # url
+                    subreddit=row[-1],  # subreddit_name (last column)
+                    created_utc=datetime.strptime(
+                        row[9], "%Y-%m-%d %H:%M:%S"  # added_date
+                    ).timestamp(),
+                    num_comments=row[8],  # num_comments
+                    selftext="",
+                )
+
+                # Add to navigation list
+                self.current_category_posts.append(post)
+
+                # Add post to view
+                self.subreddit_view.add_post(
+                    post,
+                    is_saved=True,
+                    show_in_categories=True,
+                    view_type="category",
+                )
+
+        # Refresh category counts
+        self.refresh_category_counts()
