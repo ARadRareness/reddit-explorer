@@ -407,6 +407,9 @@ class RedditExplorer(QMainWindow):
         # Update window title with post count
         self.setWindowTitle(f"Reddit Explorer ({total_posts} posts)")
 
+        # Scroll to top
+        self.subreddit_view.verticalScrollBar().setValue(0)
+
     def load_category_posts(self, category_name: str):
         """Load and display posts from a specific category."""
         # Clear and hide browser and navigation buttons, show subreddit view
@@ -594,12 +597,24 @@ class RedditExplorer(QMainWindow):
             subreddit_id = result[0]
 
         try:
+            # Format the post's creation time for SQLite
+            created_time = datetime.fromtimestamp(post.created_utc).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+
             cursor.execute(
                 """
-                INSERT INTO saved_posts (reddit_id, subreddit_id, title, url, category, show_in_categories, is_read, num_comments)
-                VALUES (?, ?, ?, ?, 'Uncategorized', 1, 1, ?)
+                INSERT INTO saved_posts (reddit_id, subreddit_id, title, url, category, show_in_categories, is_read, num_comments, added_date)
+                VALUES (?, ?, ?, ?, 'Uncategorized', 1, 1, ?, ?)
                 """,
-                (post.id, subreddit_id, post.title, post.url, post.num_comments),
+                (
+                    post.id,
+                    subreddit_id,
+                    post.title,
+                    post.url,
+                    post.num_comments,
+                    created_time,
+                ),
             )
             self.db.commit()
 
@@ -1163,3 +1178,6 @@ class RedditExplorer(QMainWindow):
 
         # Update window title with post count
         self.setWindowTitle(f"Reddit Explorer ({total_posts} posts)")
+
+        # Scroll to top
+        self.subreddit_view.verticalScrollBar().setValue(0)
