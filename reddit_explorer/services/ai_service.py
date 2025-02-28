@@ -49,6 +49,8 @@ Rules:
             f"Please create a concise summary of this Reddit post:\n\n{post.content}"
         )
 
+        print(prompt)
+
         # Get summary
         return self.openai.get_completion(
             system_message=system_message,

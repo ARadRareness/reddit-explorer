@@ -62,6 +62,9 @@ class RedditExplorer(QMainWindow):
             "subreddit"  # Track current view: "subreddit", "category", or "summary"
         )
 
+        # Regenerate incomplete summaries on startup
+        # self.regenerate_summaries()
+
     def _init_ui(self):
         """Initialize the UI components."""
         # Main layout
@@ -182,6 +185,7 @@ class RedditExplorer(QMainWindow):
 
         # Add summarize items
         QTreeWidgetItem(self.summarize_root, ["Last 24 hours"])
+        QTreeWidgetItem(self.summarize_root, ["Last 3 days"])
 
         self.tree.expandAll()
 
@@ -1269,6 +1273,8 @@ class RedditExplorer(QMainWindow):
         # Calculate the cutoff time based on the time period
         if time_period == "Last 24 hours":
             cutoff_time = datetime.now() - timedelta(days=1)
+        elif time_period == "Last 3 days":
+            cutoff_time = datetime.now() - timedelta(days=3)
         else:
             # Add more time periods here as needed
             return
@@ -1493,3 +1499,71 @@ class RedditExplorer(QMainWindow):
 
         # Refresh category counts
         self.refresh_category_counts()
+
+    def regenerate_summaries(self):
+        """Regenerate summaries that were previously marked as having insufficient information."""
+        cursor = self.db.get_cursor()
+
+        # Find all posts with incomplete summaries
+        cursor.execute(
+            """
+            SELECT sp.reddit_id, sp.title, sp.url, sp.content, sp.num_comments, sp.added_date, s.name as subreddit_name
+            FROM saved_posts sp
+            JOIN subreddits s ON sp.subreddit_id = s.id
+        """
+        )
+        rows = cursor.fetchall()
+
+        if not rows:
+            return  # No incomplete summaries found
+
+        # Create progress dialog
+        progress = QProgressDialog(
+            "Regenerating incomplete summaries...", "Cancel", 0, len(rows), self
+        )
+        progress.setWindowTitle("Regenerating Summaries")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.show()
+
+        try:
+            for i, row in enumerate(rows):
+                if progress.wasCanceled():
+                    break
+
+                # Update progress
+                progress.setValue(i)
+                progress.setLabelText(f"Regenerating summary {i + 1} of {len(rows)}...")
+
+                # Create RedditPost object from row data
+                post = RedditPost(
+                    id=row[0],  # reddit_id
+                    title=row[1],  # title
+                    url=row[2],  # url
+                    content=row[3] or "",  # content
+                    subreddit=row[6],  # subreddit_name
+                    created_utc=datetime.strptime(
+                        row[5], "%Y-%m-%d %H:%M:%S"
+                    ).timestamp(),  # added_date
+                    num_comments=row[4],  # num_comments
+                )
+
+                # Generate new summary
+                new_summary = self.ai_service.summarize_post(post)
+
+                # Update database with new summary
+                cursor.execute(
+                    "UPDATE saved_posts SET summary = ? WHERE reddit_id = ?",
+                    (new_summary, post.id),
+                )
+                self.db.commit()
+
+            # Ensure progress dialog is closed
+            progress.setValue(len(rows))
+
+        except Exception as e:
+            progress.cancel()
+            QMessageBox.warning(
+                self,
+                "Regeneration Error",
+                f"An error occurred while regenerating summaries: {str(e)}",
+            )

@@ -85,7 +85,7 @@ class SummarizeView(QScrollArea):
         self.clear()
 
         # Add title
-        title = QLabel(f"Summary for {time_period}")
+        title = QLabel(f"Summary for {time_period.lower()}")
         title.setStyleSheet(
             """
             QLabel {
