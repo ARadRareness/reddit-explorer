@@ -10,6 +10,8 @@ from PySide6.QtWebEngineCore import (
     QWebEnginePage,
     QWebEngineScript,
 )
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QContextMenuEvent, QGuiApplication
 from reddit_explorer.config.constants import BROWSER_DATA_DIR
 from reddit_explorer.ui.browser.scripts import INITIAL_HIDE_SCRIPT, HIDE_SIDEBAR_SCRIPT
 
@@ -56,6 +58,27 @@ class BrowserView(QWebEngineView):
 
         self.setPage(page)
 
+    def contextMenuEvent(self, arg__1: QContextMenuEvent):
+        """Handle context menu events to add custom actions."""
+        # Get the context menu from the base class
+        menu = self.createStandardContextMenu()
+
+        # Add separator before our custom actions
+        menu.addSeparator()
+
+        # Add "Copy link" action that copies the current URL
+        copy_link_action = menu.addAction("Copy link")
+        copy_link_action.triggered.connect(self._copy_current_url)
+
+        # Show the menu
+        menu.exec_(arg__1.globalPos())
+        menu.deleteLater()
+
+    def _copy_current_url(self):
+        """Copy the current URL to clipboard."""
+        clipboard = QGuiApplication.clipboard()
+        clipboard.setText(self.url().toString())
+
     def _handle_console_message(
         self, level: ConsoleLevel, message: str, lineNumber: int, sourceID: str
     ):
@@ -74,7 +97,7 @@ class BrowserView(QWebEngineView):
         """
         if on_load_finished:
             self.loadFinished.connect(on_load_finished)
-        self.setUrl(url)
+        self.setUrl(QUrl(url))
 
     def hide_sidebar(self):
         """Hide the Reddit sidebar and adjust layout."""

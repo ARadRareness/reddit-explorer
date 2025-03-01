@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QPushButton,
-    QFrame,
     QTreeWidget,
     QTreeWidgetItem,
     QCheckBox,
@@ -30,7 +29,6 @@ from reddit_explorer.services.ai_service import AIService
 from reddit_explorer.ui.browser.browser_view import BrowserView
 from reddit_explorer.ui.widgets.subreddit_view import SubredditView
 from reddit_explorer.ui.widgets.summarize_view import SummarizeView
-from reddit_explorer.ui.main_window_interface import MainWindowInterface
 
 # Type alias for row factory function
 RowFactory = Callable[[sqlite3.Cursor, tuple[Any, ...]], Dict[str, Any]]
@@ -508,20 +506,20 @@ class RedditExplorer(QMainWindow):
 
     def _handle_next_click(self):
         """Handle Next button click - show next post in category."""
-        if (
-            not self.current_category_posts
-            or self.current_post_index >= len(self.current_category_posts) - 1
-        ):
+        if not self.current_category_posts:
             self.next_btn.setEnabled(False)
             return
 
-        self.current_post_index += 1
+        # If we're at the last post, loop back to the first post
+        if self.current_post_index >= len(self.current_category_posts) - 1:
+            self.current_post_index = 0
+        else:
+            self.current_post_index += 1
+
         post = self.current_category_posts[self.current_post_index]
 
-        # Update Next button state
-        self.next_btn.setEnabled(
-            self.current_post_index < len(self.current_category_posts) - 1
-        )
+        # Next button should always be enabled if we have posts
+        self.next_btn.setEnabled(True)
 
         # Update checkbox state
         cursor = self.db.get_cursor()
