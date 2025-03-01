@@ -125,8 +125,9 @@ class RedditExplorer(QMainWindow):
 
         # Add widgets to layout
         nav_layout.addWidget(self.browser_category_checkbox)
-        nav_layout.addStretch()
         nav_layout.addWidget(self.next_btn)
+        nav_layout.addStretch()
+
         nav_layout.addWidget(self.done_btn)
         right_layout.addWidget(self.nav_buttons)
         self.nav_buttons.hide()
