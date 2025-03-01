@@ -651,10 +651,20 @@ class RedditExplorer(QMainWindow):
                 "%Y-%m-%d %H:%M:%S"
             )
 
+            # Try to download post content without showing progress
+            post_content = None
+            try:
+                post_content = self.reddit_service.fetch_post_details(
+                    post.subreddit, post.id
+                )
+            except Exception:
+                # Silently continue if download fails - post will be saved without content
+                pass
+
             cursor.execute(
                 """
-                INSERT INTO saved_posts (reddit_id, subreddit_id, title, url, category, show_in_categories, is_read, num_comments, added_date)
-                VALUES (?, ?, ?, ?, 'Uncategorized', 1, 1, ?, ?)
+                INSERT INTO saved_posts (reddit_id, subreddit_id, title, url, category, show_in_categories, is_read, num_comments, added_date, content, content_date)
+                VALUES (?, ?, ?, ?, 'Uncategorized', 1, 1, ?, ?, ?, CURRENT_TIMESTAMP)
                 """,
                 (
                     post.id,
@@ -663,6 +673,7 @@ class RedditExplorer(QMainWindow):
                     post.url,
                     post.num_comments,
                     created_time,
+                    post_content,  # This might be None if download failed
                 ),
             )
             self.db.commit()

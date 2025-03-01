@@ -23,7 +23,7 @@ class AIService:
         """Initialize the AI service."""
         self.openai = OpenAIService()
 
-    def summarize_post(self, post: RedditPost) -> str:
+    def summarize_post(self, post: RedditPost) -> Optional[str]:
         """
         Create a concise summary of a post's content.
 
@@ -33,6 +33,10 @@ class AIService:
         Returns:
             A concise summary of the post's content
         """
+
+        if post.content is None:
+            return None
+
         system_message = """You are an expert content summarizer. Your task is to create a concise but informative summary of Reddit posts.
 The summary should capture the key points and context while being brief.
 
@@ -78,6 +82,9 @@ Rules:
         # Generate summary if not provided
         if summary is None:
             summary = self.summarize_post(post)
+
+            if summary is None:
+                return "Uncategorized", None
 
         if self.suggest_mode:
             extra_instructions = """
