@@ -12,6 +12,7 @@ from PySide6.QtWebEngineCore import (
 )
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QContextMenuEvent, QGuiApplication
+import webbrowser
 from reddit_explorer.config.constants import BROWSER_DATA_DIR
 from reddit_explorer.ui.browser.scripts import INITIAL_HIDE_SCRIPT, HIDE_SIDEBAR_SCRIPT
 
@@ -70,6 +71,10 @@ class BrowserView(QWebEngineView):
         copy_link_action = menu.addAction("Copy link")
         copy_link_action.triggered.connect(self._copy_current_url)
 
+        # Add "Open in browser" action
+        open_browser_action = menu.addAction("Open in browser")
+        open_browser_action.triggered.connect(self._open_in_browser)
+
         # Show the menu
         menu.exec_(arg__1.globalPos())
         menu.deleteLater()
@@ -78,6 +83,10 @@ class BrowserView(QWebEngineView):
         """Copy the current URL to clipboard."""
         clipboard = QGuiApplication.clipboard()
         clipboard.setText(self.url().toString())
+
+    def _open_in_browser(self):
+        """Open the current URL in the default web browser."""
+        webbrowser.open(self.url().toString())
 
     def _handle_console_message(
         self, level: ConsoleLevel, message: str, lineNumber: int, sourceID: str
