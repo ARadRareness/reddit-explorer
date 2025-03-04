@@ -132,7 +132,7 @@ class RedditExplorer(QMainWindow):
 
         # Create views
         self.subreddit_view = SubredditView(self)
-        self.browser = BrowserView(debug=False)
+        self.browser = BrowserView()
         self.summarize_view = SummarizeView(self)
 
         # Add views to layout

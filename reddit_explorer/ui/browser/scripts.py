@@ -53,6 +53,7 @@ INITIAL_HIDE_SCRIPT = """
 # Script to hide sidebar and adjust layout
 HIDE_SIDEBAR_SCRIPT = """
 function adjustLayout() {
+
     console.log('Adjusting layout...');
     
     // Debug DOM structure
@@ -81,6 +82,18 @@ function adjustLayout() {
         overflowMenu.remove();
         console.log('Overflow menu removed');
     }
+
+    // Remove dynamic ad links
+    const adLinks = document.querySelectorAll('shreddit-comments-page-ad');
+    if (adLinks.length > 0) {
+        console.log(`Found ${adLinks.length} dynamic ad links`);
+        adLinks.forEach(adLink => {
+            adLink.remove();
+        });
+        console.log('Dynamic ad links removed');
+    }
+
+    /*
     
     // Try to find the left nav container using both tag name and ID
     const leftNavContainer = document.querySelector('flex-left-nav-container#left-sidebar-container') || 
@@ -106,18 +119,18 @@ function adjustLayout() {
                 leftNavContainer.remove();
             }
         }
-    }
+    } */
     
     // Find and adjust main content
     const subgridContainer = document.getElementById('subgrid-container');
     const mainContainer = document.querySelector('.main-container');
     const mainElement = document.querySelector('.main');
+
+    console.log('Main elements:')
+    console.log(subgridContainer)
+    console.log(mainContainer)
+    console.log(mainElement)
     
-    console.log('Main elements:', {
-        subgridContainer: subgridContainer?.className,
-        mainContainer: mainContainer?.className,
-        mainElement: mainElement?.className
-    });
     
     if (mainElement) {
         console.log('Found main element, moving to top of document...');
