@@ -14,14 +14,17 @@ A desktop application built with PySide6 that allows users to browse and save Re
 - Python 3.8+
 - PySide6
 - Requests
+- OpenAI
+- Python-dotenv
 
 ## Installation
 
 1. Clone the repository
 2. Install dependencies:
 ```bash
-pip install PySide6 requests
+pip install -r requirements.txt
 ```
+3. Rename .env.example to .env, and set the OpenAI settings
 
 ## Usage
 
