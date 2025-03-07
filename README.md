@@ -1,6 +1,6 @@
 # Reddit Explorer
 
-A desktop application built with PySide6 that allows users to browse and save Reddit posts from their favorite subreddits.
+An AI-enhanced desktop application built with PySide6 that allows users to browse and save Reddit posts from their favorite subreddits.
 
 ## Features
 
