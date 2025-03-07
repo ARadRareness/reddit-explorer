@@ -7,7 +7,11 @@ A desktop application built with PySide6 that allows users to browse and save Re
 - Browse posts from multiple subreddits
 - Save interesting posts for later reading
 - Organize saved posts into categories
-- Modern Qt-based user interface
+
+- AI-powered features
+  - Automatic post categorization
+  - Post content summarization
+  - Time-based summaries (last 24 hours, last 3 days)
 
 ## Requirements
 
