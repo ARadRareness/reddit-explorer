@@ -215,7 +215,7 @@ Summary: {summary}
 
 REQUIRED OUTPUT FORMAT:
 You MUST format each insight using XML tags exactly like this:
-<point>The actual insight text goes here</point><id>N</id>
+<point>...</point><id>N</id>
 
 Where N is the index number (0-based) of the post that contains this insight.
 
