@@ -13,6 +13,17 @@ A desktop application built with PySide6 that allows users to browse and save Re
   - Post content summarization
   - Time-based summaries (last 24 hours, last 3 days)
 
+## Screenshots
+
+### Category View - Saved Posts
+![Category View](example.png)
+
+### Reddit Browser
+![Reddit Browser](example2.png)
+
+### 24-Hour Summary
+![24-Hour Summary](example3.png)
+
 ## Requirements
 
 - Python 3.8+
@@ -23,18 +34,46 @@ A desktop application built with PySide6 that allows users to browse and save Re
 
 ## Installation
 
-1. Clone the repository
-2. Install dependencies:
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/reddit-explorer.git
+cd reddit-explorer
+```
+
+2. (Optional but recommended) Create and activate a virtual environment:
+
+On Windows:
+```bash
+python -m venv venv
+venv\Scripts\activate
+```
+
+On macOS/Linux:
+```bash
+python -m venv venv
+source venv/bin/activate
+```
+
+3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
-3. Rename .env.example to .env, and set the OpenAI settings
+
+4. Rename .env.example to .env, and set the OpenAI settings
 
 ## Usage
 
-Run the application:
+Run the application using either of these methods:
+
+1. Install the package in development mode and run:
 ```bash
-python reddit_explorer.py
+python -m pip install -e .
+reddit_explorer
+```
+
+2. Or run directly without installing:
+```bash
+python -m reddit_explorer.main
 ```
 
 ## License
