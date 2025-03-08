@@ -447,6 +447,7 @@ class RedditExplorer(QMainWindow):
         self.browser.hide()
         self.nav_buttons.hide()
         self.summarize_view.hide()  # Hide summary view
+        self.search_view.hide()  # Hide search view
         self.subreddit_view.show()
         self.subreddit_view.clear()
         self._current_view = "category"  # Set current view to category
