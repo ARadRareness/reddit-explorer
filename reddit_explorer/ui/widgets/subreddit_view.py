@@ -99,3 +99,17 @@ class SubredditView(QScrollArea):
     def scroll_to_bottom(self):
         """Scroll to the bottom of the view."""
         self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+
+    def remove_post_widget(self, post_id: str):
+        """
+        Remove a post widget by its ID.
+
+        Args:
+            post_id: ID of the post to remove
+        """
+        for i in range(self._layout.count()):
+            widget = self._layout.itemAt(i).widget()
+            if isinstance(widget, PostWidget) and widget.post_data.id == post_id:
+                widget.deleteLater()
+                self._layout.removeWidget(widget)
+                break

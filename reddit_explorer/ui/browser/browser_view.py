@@ -77,7 +77,6 @@ class BrowserView(QWebEngineView):
 
         # Show the menu
         menu.exec_(arg__1.globalPos())
-        menu.deleteLater()
 
     def _copy_current_url(self):
         """Copy the current URL to clipboard."""

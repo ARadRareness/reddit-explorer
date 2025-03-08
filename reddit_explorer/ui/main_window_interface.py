@@ -2,7 +2,7 @@
 Interface for the main window to avoid circular dependencies.
 """
 
-from typing import List, Protocol, TYPE_CHECKING
+from typing import List, Protocol, TYPE_CHECKING, Optional
 from PySide6.QtWidgets import QWidget, QPushButton, QCheckBox
 from reddit_explorer.data.models import RedditPost
 from reddit_explorer.data.database import Database
@@ -28,7 +28,7 @@ class MainWindowInterface(Protocol):
     nav_buttons: QWidget
     next_btn: QPushButton
     browser_category_checkbox: QCheckBox
-    current_category: str
+    current_category: Optional[str]
     current_category_posts: List[RedditPost]
     current_post_index: int
 

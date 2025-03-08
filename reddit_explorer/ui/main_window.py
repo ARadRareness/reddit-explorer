@@ -53,12 +53,11 @@ class RedditExplorer(QMainWindow):
         self._init_ui()
 
         # Initialize state
-        self.current_category: Optional[str] = None
+        self._current_category_name: Optional[str] = None
         self.current_category_posts: List[RedditPost] = []
         self.current_post_index: int = -1
-        self._current_view: str = (
-            "subreddit"  # Track current view: "subreddit", "category", or "summary"
-        )
+        self._current_view: str = "subreddit"
+        self.current_category: Optional[str] = None
 
         # Regenerate incomplete summaries on startup
         # self.regenerate_summaries()
@@ -404,14 +403,12 @@ class RedditExplorer(QMainWindow):
         posts = self.reddit_service.fetch_all_subreddit_posts(subreddit_name)
 
         # First find the most recent saved post
-        posts_to_show = []
-        found_saved = False
+        posts_to_show: List[RedditPost] = []
         for post in posts:
             is_saved = post.id in saved_posts
             posts_to_show.append(post)
 
             if is_saved:  # Stop if we found a saved post
-                found_saved = True
                 break
 
             if len(posts_to_show) >= 200:  # Also stop if we hit the limit
@@ -444,6 +441,7 @@ class RedditExplorer(QMainWindow):
         self._current_view = "category"  # Set current view to category
 
         # Store category name for navigation
+        self._current_category_name = category_name
         self.current_category = category_name
         self.current_category_posts = []
         self.current_post_index = -1
@@ -461,7 +459,9 @@ class RedditExplorer(QMainWindow):
             return d
 
         # Cast to avoid type error
-        cursor.row_factory = cast(sqlite3.Row, dict_factory)
+        cursor.row_factory = cast(
+            Callable[[sqlite3.Cursor, sqlite3.Row], Any], dict_factory
+        )
 
         cursor.execute(
             """
@@ -578,7 +578,7 @@ class RedditExplorer(QMainWindow):
         self.browser.setUrl("")
 
         # If we were viewing a category, update only the changed post instead of reloading everything
-        if self.current_category and self._current_view == "category":
+        if self._current_category_name and self._current_view == "category":
             if current_post_id and show_in_categories is not None:
                 # Update only the changed post
                 self._update_category_post(current_post_id, show_in_categories)
@@ -698,7 +698,7 @@ class RedditExplorer(QMainWindow):
     ) -> None:
         """Update whether a post should be shown in categories view."""
         # If we're in category view, use the optimized update method
-        if self._current_view == "category" and self.current_category:
+        if self._current_view == "category" and self._current_category_name:
             self._update_category_post(post_id, show_in_categories)
         else:
             # Otherwise, just update the database
@@ -919,7 +919,7 @@ class RedditExplorer(QMainWindow):
                 self.refresh_category_counts()
 
                 # If we're currently viewing this category, switch to Uncategorized
-                if self.current_category == category_name:
+                if self._current_category_name == category_name:
                     self.load_category_posts("Uncategorized")
 
             except sqlite3.Error:
@@ -1166,7 +1166,7 @@ class RedditExplorer(QMainWindow):
                 self.refresh_category_counts()
 
                 # If we're currently viewing this category, reload it
-                if self.current_category == category_name:
+                if self._current_category_name == category_name:
                     self.load_category_posts(category_name)
 
                 QMessageBox.information(
@@ -1183,15 +1183,9 @@ class RedditExplorer(QMainWindow):
                 f"An error occurred while categorizing posts: {str(e)}",
             )
 
-    @property
-    def current_category(self) -> Optional[str]:
+    def get_current_category(self) -> Optional[str]:
         """Get the current category name."""
-        return self._current_category
-
-    @current_category.setter
-    def current_category(self, value: Optional[str]):
-        """Set the current category name."""
-        self._current_category = value
+        return self.current_category
 
     def _load_subreddit_posts_fixed(self, subreddit_name: str, post_count: int):
         """
@@ -1264,7 +1258,7 @@ class RedditExplorer(QMainWindow):
 
         # Show generating content dialog
         progress = QProgressDialog(
-            "Generating content...", None, 0, 0, self  # No cancel button
+            "Generating content...", "", 0, 0, self  # Empty string for no cancel button
         )
         progress.setWindowTitle("Generating Content")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
@@ -1304,7 +1298,7 @@ class RedditExplorer(QMainWindow):
         rows = cursor.fetchall()
 
         # Create list of posts that need summaries
-        posts_to_summarize = []
+        posts_to_summarize: List[RedditPost] = []
         for row in rows:
             # Unpack the row tuple into named variables for clarity
             (
@@ -1447,16 +1441,8 @@ class RedditExplorer(QMainWindow):
                 post_in_list = True
                 # If show_in_categories is False, remove the post from the list and view
                 if not show_in_categories:
-                    # Find and remove the post widget from the view
-                    for j in range(self.subreddit_view._layout.count()):
-                        widget = self.subreddit_view._layout.itemAt(j).widget()
-                        if (
-                            hasattr(widget, "post_data")
-                            and widget.post_data.id == post_id
-                        ):
-                            widget.deleteLater()
-                            self.subreddit_view._layout.removeWidget(widget)
-                            break
+                    # Remove the post widget from the view
+                    self.subreddit_view.remove_post_widget(post_id)
 
                     # Remove the post from the list
                     self.current_category_posts.pop(i)
@@ -1468,7 +1454,7 @@ class RedditExplorer(QMainWindow):
 
         # If the post is not in the list but should be shown in categories,
         # we need to add it (this happens when changing from not showing to showing)
-        if not post_in_list and show_in_categories and self.current_category:
+        if not post_in_list and show_in_categories and self._current_category_name:
             # Get post data from database
             cursor.row_factory = None  # Reset row factory to default
             cursor.execute(

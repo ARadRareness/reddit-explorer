@@ -59,7 +59,7 @@ class RedditService:
         Returns:
             List of RedditPost objects
         """
-        all_posts = []
+        all_posts: List[RedditPost] = []
         after = None
 
         while len(all_posts) < max_posts:
