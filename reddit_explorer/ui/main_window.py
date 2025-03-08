@@ -29,6 +29,7 @@ from reddit_explorer.services.ai_service import AIService
 from reddit_explorer.ui.browser.browser_view import BrowserView
 from reddit_explorer.ui.widgets.subreddit_view import SubredditView
 from reddit_explorer.ui.widgets.summarize_view import SummarizeView
+from reddit_explorer.ui.widgets.search_view import SearchView
 
 # Type alias for row factory function
 RowFactory = Callable[[sqlite3.Cursor, tuple[Any, ...]], Dict[str, Any]]
@@ -133,15 +134,19 @@ class RedditExplorer(QMainWindow):
         self.subreddit_view = SubredditView(self)
         self.browser = BrowserView()
         self.summarize_view = SummarizeView(self)
+        self.search_view = SearchView(self)
+        self.search_view.set_title_callback(self.setWindowTitle)  # Set title callback
 
         # Add views to layout
         right_layout.addWidget(self.subreddit_view)
         right_layout.addWidget(self.browser)
         right_layout.addWidget(self.summarize_view)
+        right_layout.addWidget(self.search_view)
 
         # Hide views initially
         self.browser.hide()
         self.summarize_view.hide()
+        self.search_view.hide()
 
         # Add panels to main layout
         layout.addWidget(left_panel, 0)
@@ -159,6 +164,7 @@ class RedditExplorer(QMainWindow):
         self.subreddits_root = QTreeWidgetItem(self.tree, ["Subreddits"])
         self.categories_root = QTreeWidgetItem(self.tree, ["Categories"])
         self.summarize_root = QTreeWidgetItem(self.tree, ["Summarize"])
+        self.search_root = QTreeWidgetItem(self.tree, ["Search"])
 
         # Load subreddits under subreddits root
         cursor.execute("SELECT name FROM subreddits ORDER BY name")
@@ -359,6 +365,11 @@ class RedditExplorer(QMainWindow):
 
     def _handle_tree_click(self, item: QTreeWidgetItem):
         """Handle single-click events on tree items."""
+        # Handle root items
+        if item.text(0) == "Search":
+            self._load_search_view()
+            return
+
         parent = cast(Optional[QTreeWidgetItem], item.parent())
         if parent is None:
             return
@@ -568,6 +579,8 @@ class RedditExplorer(QMainWindow):
         # Show the appropriate view based on where we came from
         if self._current_view == "summary":
             self.summarize_view.show()
+        elif self._current_view == "search":
+            self.search_view.show()
         else:  # "subreddit" or "category"
             self.subreddit_view.show()
 
@@ -1563,3 +1576,16 @@ class RedditExplorer(QMainWindow):
                 "Regeneration Error",
                 f"An error occurred while regenerating summaries: {str(e)}",
             )
+
+    def _load_search_view(self):
+        """Load and display the search view."""
+        # Hide other views
+        self.browser.hide()
+        self.nav_buttons.hide()
+        self.subreddit_view.hide()
+        self.summarize_view.hide()
+        self.search_view.show()
+        self._current_view = "search"  # Set current view to search
+
+        # Reset window title
+        self.setWindowTitle("Reddit Explorer - Search")

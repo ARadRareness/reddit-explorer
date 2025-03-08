@@ -13,6 +13,7 @@ from reddit_explorer.ui.browser.browser_view import BrowserView
 if TYPE_CHECKING:
     from reddit_explorer.ui.widgets.subreddit_view import SubredditView
     from reddit_explorer.ui.widgets.summarize_view import SummarizeView
+    from reddit_explorer.ui.widgets.search_view import SearchView
 
 
 class MainWindowInterface(Protocol):
@@ -25,6 +26,7 @@ class MainWindowInterface(Protocol):
     browser: BrowserView
     subreddit_view: "SubredditView"
     summarize_view: "SummarizeView"
+    search_view: "SearchView"
     nav_buttons: QWidget
     next_btn: QPushButton
     browser_category_checkbox: QCheckBox

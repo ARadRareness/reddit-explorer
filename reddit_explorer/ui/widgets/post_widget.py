@@ -177,7 +177,16 @@ class PostWidget(QFrame):
         # Show browser and navigation buttons
         self.main_window.browser.show()
         self.main_window.nav_buttons.show()
-        self.main_window.subreddit_view.hide()
+
+        # Hide the appropriate view based on view type
+        if self.view_type == "search":
+            self.main_window.search_view.hide()
+        elif self.view_type == "category":
+            self.main_window.subreddit_view.hide()
+        else:  # "subreddit"
+            self.main_window.subreddit_view.hide()
+
+        # Load the URL
         self.main_window.browser.load_url(
             post_url, lambda ok: self.main_window.browser.hide_sidebar()
         )
