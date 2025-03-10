@@ -100,8 +100,8 @@ class PostWidget(QFrame):
         # Description
         if self.post_data.selftext:
             text = (
-                f"{self.post_data.selftext[:300]}..."
-                if len(self.post_data.selftext) > 300
+                f"{self.post_data.selftext[:500]}..."
+                if len(self.post_data.selftext) > 500
                 else self.post_data.selftext
             )
             self.description = QLabel(text)

@@ -85,6 +85,36 @@ class SearchView(QScrollArea):
         # Add search controls to main layout
         self._layout.addWidget(search_container)
 
+    def _highlight_search_term(self, text: str, search_term: str) -> str:
+        """
+        Highlight search term in text with HTML bold tags, case-insensitive.
+
+        Args:
+            text: The text to process
+            search_term: The term to highlight
+
+        Returns:
+            Text with search term wrapped in bold tags
+        """
+        idx = 0
+        result = ""
+        text_lower = text.lower()
+        term_lower = search_term.lower()
+
+        while idx < len(text):
+            match_idx = text_lower.find(term_lower, idx)
+            if match_idx == -1:
+                result += text[idx:]
+                break
+
+            # Add text before match
+            result += text[idx:match_idx]
+            # Add bold-wrapped match (using original case)
+            result += f"**{text[match_idx:match_idx + len(search_term)]}**"
+            idx = match_idx + len(search_term)
+
+        return result
+
     def _handle_search(self):
         """Handle search button click or enter key press."""
         search_term = self.search_input.text().strip()
@@ -137,6 +167,27 @@ class SearchView(QScrollArea):
         # Process results
         total_posts = 0
         for row in cursor.fetchall():
+            # Get content and check for match context
+            content = row["content"] or ""
+            title = row["title"] or ""
+            context = ""
+
+            # Only show context if match is not in title and not in first 500 chars
+            if (
+                search_term.lower() not in title.lower()
+                and search_term.lower() not in content[:500].lower()
+                and search_term.lower() in content[500:].lower()
+            ):
+                # Find the position of the match
+                match_pos = content.lower().find(search_term.lower(), 500)
+                # Get context (100 chars before and after)
+                start = max(0, match_pos - 100)
+                end = min(len(content), match_pos + len(search_term) + 100)
+                context = content[start:end].strip()
+                # Highlight search term and add ellipsis
+                context = self._highlight_search_term(context, search_term)
+                context = f"[...] {context} [...]\n"
+
             # Create post data from database row
             post = RedditPost(
                 id=row["reddit_id"],
@@ -147,7 +198,7 @@ class SearchView(QScrollArea):
                     row["added_date"], "%Y-%m-%d %H:%M:%S"
                 ).timestamp(),
                 num_comments=row["num_comments"],
-                selftext=row["content"] or "",
+                selftext=(context + content) if context else content,
             )
 
             # Add post to view
