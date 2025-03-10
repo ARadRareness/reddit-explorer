@@ -391,6 +391,7 @@ class RedditExplorer(QMainWindow):
         self.browser.hide()
         self.nav_buttons.hide()
         self.summarize_view.hide()  # Hide summary view
+        self.search_view.hide()  # Hide search view
         self.subreddit_view.show()
         self.subreddit_view.clear()
         self._current_view = "subreddit"  # Set current view to subreddit
@@ -1213,6 +1214,7 @@ class RedditExplorer(QMainWindow):
         self.browser.hide()
         self.nav_buttons.hide()
         self.summarize_view.hide()  # Hide summary view
+        self.search_view.hide()  # Hide search view
         self.subreddit_view.show()
         self.subreddit_view.clear()
 
@@ -1261,6 +1263,7 @@ class RedditExplorer(QMainWindow):
         self.browser.hide()
         self.nav_buttons.hide()
         self.subreddit_view.hide()
+        self.search_view.hide()  # Hide search view
         self.summarize_view.show()
         self._current_view = "summary"  # Set current view to summary
 
@@ -1422,6 +1425,7 @@ class RedditExplorer(QMainWindow):
             self.nav_buttons.show()
             self.subreddit_view.hide()
             self.summarize_view.hide()
+            self.search_view.hide()  # Hide search view
 
             # Set the checkbox state based on the database value
             self.browser_category_checkbox.setChecked(bool(show_in_categories))
