@@ -166,9 +166,6 @@ class RedditExplorer(QMainWindow):
         self.summarize_root = QTreeWidgetItem(self.tree, ["Summarize"])
         self.search_root = QTreeWidgetItem(self.tree, ["Search"])
 
-        # Add "Most popular" as first category
-        QTreeWidgetItem(self.categories_root, ["Most popular"])
-
         # Load subreddits under subreddits root
         cursor.execute("SELECT name FROM subreddits ORDER BY name")
         for row in cursor.fetchall():
@@ -477,29 +474,17 @@ class RedditExplorer(QMainWindow):
             Callable[[sqlite3.Cursor, sqlite3.Row], Any], dict_factory
         )
 
-        # Different query for "Most popular" category
-        if category_name == "Most popular":
-            cursor.execute(
-                """
-                SELECT sp.*, s.name as subreddit_name
-                FROM saved_posts sp
-                JOIN subreddits s ON sp.subreddit_id = s.id
-                WHERE sp.show_in_categories = 1
-                ORDER BY sp.num_comments DESC
-                LIMIT 200
-                """
-            )
-        else:
-            cursor.execute(
-                """
-                SELECT sp.*, s.name as subreddit_name
-                FROM saved_posts sp
-                JOIN subreddits s ON sp.subreddit_id = s.id
-                WHERE sp.category = ? AND sp.show_in_categories = 1
-                ORDER BY sp.added_date DESC
-                """,
-                (category_name,),
-            )
+        # Remove special handling for "Most popular" category
+        cursor.execute(
+            """
+            SELECT sp.*, s.name as subreddit_name
+            FROM saved_posts sp
+            JOIN subreddits s ON sp.subreddit_id = s.id
+            WHERE sp.category = ? AND sp.show_in_categories = 1
+            ORDER BY sp.added_date DESC
+            """,
+            (category_name,),
+        )
 
         total_posts = 0
         for row in cursor.fetchall():
@@ -537,11 +522,20 @@ class RedditExplorer(QMainWindow):
             self.next_btn.setEnabled(False)
             return
 
-        # If we're at the last post, loop back to the first post
+        print("INDEX BEFORE: ", self.current_post_index)
+
+        self.current_post_index += 1
+
+        # If we're at the last post or current index is invalid, start from beginning
         if self.current_post_index >= len(self.current_category_posts) - 1:
             self.current_post_index = 0
-        else:
-            self.current_post_index += 1
+
+        print("INDEX AFTER: ", self.current_post_index)
+
+        # Safety check in case list is now empty
+        if not self.current_category_posts:
+            self.next_btn.setEnabled(False)
+            return
 
         post = self.current_category_posts[self.current_post_index]
 
@@ -555,7 +549,15 @@ class RedditExplorer(QMainWindow):
         )
         result = cursor.fetchone()
         if result:
+            # Temporarily disconnect the checkbox signal
+            self.browser_category_checkbox.stateChanged.disconnect(
+                self._handle_browser_category_changed
+            )
             self.browser_category_checkbox.setChecked(bool(result[0]))
+            # Reconnect the checkbox signal
+            self.browser_category_checkbox.stateChanged.connect(
+                self._handle_browser_category_changed
+            )
 
         # Construct and load Reddit post URL
         post_url = f"https://www.reddit.com/r/{post.subreddit}/comments/{post.id}"
@@ -1477,13 +1479,18 @@ class RedditExplorer(QMainWindow):
         """
         Update a single post in the category view without reloading all posts.
         """
-        print("Updating category post")
+        print(
+            "Updating category post ",
+            post_id,
+            " with show_in_categories ",
+            show_in_categories,
+        )
         # Check if the post is in the current category posts list
-        post_in_list = False
+
         for i, post in enumerate(self.current_category_posts):
             if post.id == post_id:
                 print("Post found in list, ", post.id)
-                post_in_list = True
+
                 # If show_in_categories is False, remove the post from the list and view
                 print("SHOW IN CATEGORIES", show_in_categories)
                 if not show_in_categories:
@@ -1496,8 +1503,7 @@ class RedditExplorer(QMainWindow):
                     print("REMOVED", a)
 
                     # Update current_post_index if needed
-                    if i <= self.current_post_index:
-                        self.current_post_index = max(0, self.current_post_index - 1)
+                    self.current_post_index -= 1
 
                     break
                 else:
@@ -1514,39 +1520,26 @@ class RedditExplorer(QMainWindow):
 
         # If the post is not in the list but should be shown in categories,
         # we need to add it (this happens when changing from not showing to showing)
-        if not post_in_list and show_in_categories and self._current_category_name:
+        if (
+            False
+        ):  # not post_in_list and show_in_categories and self._current_category_name:
             print("Post not in list but should be shown in categories")
             cursor = self.db.get_cursor()
 
-            # Different query for "Most popular" category
-            if self._current_category_name == "Most popular":
-                print("Most popular category")
-                cursor.execute(
-                    """
-                    SELECT sp.*, s.name as subreddit_name
-                    FROM saved_posts sp
-                    JOIN subreddits s ON sp.subreddit_id = s.id
-                    WHERE sp.reddit_id = ? AND sp.show_in_categories = 1
-                    """,
-                    (post_id,),
-                )
-            else:
-                print("Other category")
-                cursor.execute(
-                    """
-                    SELECT sp.*, s.name as subreddit_name
-                    FROM saved_posts sp
-                    JOIN subreddits s ON sp.subreddit_id = s.id
-                    WHERE sp.reddit_id = ? AND sp.category = ? AND sp.show_in_categories = 1
-                    """,
-                    (post_id, self._current_category_name),
-                )
+            # Remove special handling for "Most popular" category
+            cursor.execute(
+                """
+                SELECT sp.*, s.name as subreddit_name
+                FROM saved_posts sp
+                JOIN subreddits s ON sp.subreddit_id = s.id
+                WHERE sp.reddit_id = ? AND sp.category = ? AND sp.show_in_categories = 1
+                """,
+                (post_id, self._current_category_name),
+            )
 
             row = cursor.fetchone()
-            print(row)
 
             if row:
-                print("Row found")
                 # Create post data from database row
                 post = RedditPost(
                     id=row[1],  # reddit_id
@@ -1559,6 +1552,7 @@ class RedditExplorer(QMainWindow):
                     num_comments=row[8],  # num_comments
                     selftext="",
                 )
+                print("Post created", post)
 
                 # Add to navigation list
                 self.current_category_posts.append(post)
