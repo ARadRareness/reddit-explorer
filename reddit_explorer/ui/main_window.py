@@ -266,7 +266,7 @@ class RedditExplorer(QMainWindow):
         # Handle right-click on subreddit items
         if parent and parent.text(0) == "Subreddits":
             subreddit_name = item.text(0)
-            show_200_action = menu.addAction("Show 200")
+            show_400_action = menu.addAction("Show 600")
             menu.addSeparator()
             rename_action = menu.addAction("Rename")
             remove_action = menu.addAction("Remove")
@@ -277,8 +277,8 @@ class RedditExplorer(QMainWindow):
                 self._remove_subreddit(subreddit_name)
             elif action == rename_action:
                 self._rename_subreddit(item, subreddit_name)
-            elif action == show_200_action:
-                self._load_subreddit_posts_fixed(subreddit_name, 200)
+            elif action == show_400_action:
+                self._load_subreddit_posts_fixed(subreddit_name, 600)
 
     def _add_category(self):
         """Show dialog to add a new category."""

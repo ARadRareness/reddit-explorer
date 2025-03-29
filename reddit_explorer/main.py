@@ -12,10 +12,6 @@ def main():
     app = QApplication(sys.argv)
     window = RedditExplorer()
 
-    # Add some test subreddits
-    window.add_subreddit("LocalLLaMA")
-    window.add_subreddit("Singularity")
-
     window.show()
     sys.exit(app.exec())
 
